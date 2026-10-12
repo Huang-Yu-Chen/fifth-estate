@@ -1,0 +1,25 @@
+# 分析參數（改動會影響所有指標；方法論頁會顯示目前的值）
+
+events:
+  window_days: 3          # MBD：3 天滑動視窗
+  tau: 0.80               # cosine 門檻（MBD 網頁 0.8、論文 0.85）；上線後以人工標註的文章配對校準
+  min_size: 3             # ≥3 篇才算事件（MBD）
+  max_size: 60            # 超過就用 Leiden 再切
+  min_density: 0.2        # 邊密度低於此值也再切
+  continuity_jaccard: 0.5 # 與前一天事件成員重疊 ≥ 此值則延續同一事件 ID
+
+polarization:
+  min_articles_per_outlet: 3   # 合格媒體：此單位至少幾篇
+  shrinkage_kappa: 5           # 經驗貝氏收縮強度（等同 κ 篇位於平均值的虛擬文章）
+  min_total_articles: 15       # 少於此數顯示「樣本不足」
+  min_outlets: 4
+  china_min_share: 0.30        # 涉中報導占比達此值、且合格媒體 ≥3 家，才納入抗中友中軸
+  china_min_outlets: 3
+  bootstrap: 1000
+  ci: 0.90
+
+windows: [7, 30, 90]           # 天
+baseline_days: 90              # 媒體整體綠藍基準（排序與選題偏向用）
+
+wire:
+  minhash_threshold: 0.8       # 與中央社稿相似度 ≥ 此值視為轉載

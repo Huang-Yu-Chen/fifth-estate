@@ -85,6 +85,7 @@ SCHEMAS: dict[str, pa.Schema] = {
     "stage1": pa.schema(
         [
             ("article_id", STR),
+            ("scope_reason", STR),
             ("scope", STR),
             ("takeaways", STRS),
             ("topic_id", STR),

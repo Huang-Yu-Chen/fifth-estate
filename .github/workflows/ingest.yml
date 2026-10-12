@@ -20,12 +20,12 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       TZ: Asia/Taipei
       FIFTH_DATA_DIR: ${{ github.workspace }}/data
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Data partitions to check out
         id: paths
         run: |
@@ -41,7 +41,7 @@ jobs:
             done
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           repository: Huang-Yu-Chen/fifth-estate-data
           ssh-key: ${{ secrets.DATA_REPO_DEPLOY_KEY }}
@@ -60,6 +60,11 @@ jobs:
           --since-hours "${{ inputs.since_hours || '36' }}"
           --max-fetch "${{ inputs.max_fetch || '150' }}"
           --summary "$GITHUB_STEP_SUMMARY"
+      - name: Annotate (Stage 1 → Stage 2 batch → embeddings)
+        if: always()
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: uv run fifth annotate --summary "$GITHUB_STEP_SUMMARY"
       - name: Commit data
         if: always()
         working-directory: data

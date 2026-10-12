@@ -52,6 +52,13 @@ def clean_title(title: str | None) -> str:
     return t
 
 
+def blind(text: str, self_names: tuple[str, ...] = ()) -> str:
+    """Replace the publisher's own name (MBD: drop self-references); other outlets' names stay."""
+    for name in sorted((n for n in self_names if len(n) >= 2), key=len, reverse=True):
+        text = text.replace(name, "本媒體" if len(name) > 2 else "")
+    return re.sub(r"(本媒體){2,}", "本媒體", text)
+
+
 def _is_boilerplate(s: str) -> bool:
     return any(p.search(s) for p in _boilerplate())
 
@@ -95,10 +102,7 @@ def clean_body(body: str, self_names: tuple[str, ...] = ()) -> str:
             out.append("".join(kept).strip())
     text = "\n".join(out)
 
-    # Remaining publisher self-references (MBD) -> neutral placeholder; other outlets' names stay.
-    for name in names:
-        text = text.replace(name, "本媒體" if len(name) > 2 else "")
-    text = re.sub(r"(本媒體){2,}", "本媒體", text)
+    text = blind(text, self_names)
     if len(text) > MAX_BODY_CHARS:
         text = text[:MAX_BODY_CHARS] + "……（後略）"
     return text

@@ -1,0 +1,114 @@
+# 議題分類（固定清單，相當於 MBD 的 topics）。
+# 子議題（subtopics）是動態清單：種子在 config/subtopics_seed.yaml，
+# 執行時的版本存在資料 repo 的 registry/subtopics.yaml（會自動新增、整併）。
+# 修改 topic 的 id 會讓舊標註對不上，只能新增或改名稱／說明。
+
+categories:
+  domestic: 國內政治
+  diplomacy: 外交
+  cross_strait: 兩岸
+
+topics:
+  # ---- 國內政治
+  - id: elections
+    category: domestic
+    name: 選舉與政黨競爭
+    description: 各級選舉（含 2026 九合一）、提名與選戰、民調、辯論會、政黨合作與競爭、黨內權力
+  - id: recall_referendum
+    category: domestic
+    name: 罷免與公投
+    description: 罷免案、公民投票及其制度
+  - id: legislature
+    category: domestic
+    name: 國會運作與立法爭議
+    description: 立法院議事、法案攻防、朝野協商、行政立法對立、覆議、不信任案、國會改革
+  - id: budget_fiscal
+    category: domestic
+    name: 預算與財政
+    description: 總預算、特別預算審查、財政收支劃分、舉債、普發現金、中央地方財政
+  - id: constitution_judiciary
+    category: domestic
+    name: 憲政與司法
+    description: 憲法法庭與大法官、憲政體制、司法改革、死刑存廢、修憲
+  - id: political_cases
+    category: domestic
+    name: 政治司法案件與弊案
+    description: 涉及政治人物的司法案件（如京華城案）、貪污、政治獻金、選舉賄選、政府採購弊案
+  - id: governance
+    category: domestic
+    name: 行政施政與人事
+    description: 總統府與行政院施政、內閣與官員人事、元首重要談話（如國慶演說）、政府效能與施政爭議
+  - id: energy_environment
+    category: domestic
+    name: 能源與環境
+    description: 核電與能源轉型、電價、供電、環境與氣候政策
+  - id: economy_livelihood
+    category: domestic
+    name: 經濟民生政策
+    description: 物價、薪資、房市、稅制、勞動、產業與交通建設政策
+  - id: social_policy
+    category: domestic
+    name: 社福教育醫療
+    description: 長照、健保、年金、教育、少子化、醫療與公衛政策
+  - id: transitional_justice
+    category: domestic
+    name: 轉型正義與歷史
+    description: 黨產、威權遺緒、二二八與白色恐怖、中正紀念堂轉型、歷史詮釋
+  - id: identity_ethnicity
+    category: domestic
+    name: 國家認同與族群語言
+    description: 國號與國家認同、原住民族、本土語言、新住民
+  - id: media_speech
+    category: domestic
+    name: 媒體言論與假訊息
+    description: 新聞自由、媒體監理（NCC）、假訊息、網路與平台治理
+  - id: public_safety
+    category: domestic
+    name: 治安與社會安全
+    description: 詐騙、治安與毒品政策、重大社會事件引發的政治攻防
+  # ---- 外交
+  - id: us_relations
+    category: diplomacy
+    name: 台美關係
+    description: 美國對台政策、關稅與貿易協定、對台軍售、美國國會友台法案、美中台三角互動
+  - id: japan_indopacific
+    category: diplomacy
+    name: 台日與印太
+    description: 台日關係、菲律賓、韓國、澳洲等印太國家、第一島鏈與區域安全合作
+  - id: europe_bilateral
+    category: diplomacy
+    name: 台歐與其他雙邊
+    description: 台灣與歐洲及其他非邦交國的往來、官員互訪
+  - id: allies_participation
+    category: diplomacy
+    name: 邦交與國際參與
+    description: 邦交國關係、斷交與打壓、國際組織參與（WHA、ICAO、聯大 2758 號決議）
+  - id: econ_security
+    category: diplomacy
+    name: 經濟安全與科技外交
+    description: 半導體與台積電海外布局、供應鏈、出口管制、科技合作
+  # ---- 兩岸
+  - id: pla_activity
+    category: cross_strait
+    name: 共軍活動與灰色地帶
+    description: 共軍對台軍演、共機共艦、海警、海纜破壞、灰色地帶行動
+  - id: defense_policy
+    category: cross_strait
+    name: 國防政策與軍購
+    description: 國防預算與特別條例、軍購、兵役、國軍人事與事件、國防工業與無人機
+  - id: exchanges_parties
+    category: cross_strait
+    name: 兩岸交流與政黨往來
+    description: 政黨與政治人物訪中、兩岸論壇、交流團、兩岸對話與談判主張
+  - id: united_front_security
+    category: cross_strait
+    name: 統戰滲透與國安案件
+    description: 共諜案、統戰與滲透、陸配與中國身分證、境外勢力、國安法制
+  - id: cross_strait_economy
+    category: cross_strait
+    name: 兩岸經貿與人員往來
+    description: ECFA、陸客陸生、台商、農漁產品、中國對台經濟手段
+  - id: sovereignty
+    category: cross_strait
+    name: 主權論述與國際地位
+    description: 九二共識與一中原則、台灣地位、統獨、中國對台政策表態與回應

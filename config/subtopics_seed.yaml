@@ -1,0 +1,84 @@
+# 子議題種子（2026 年 10 月）。第一次執行時複製到資料 repo 的 registry/subtopics.yaml，
+# 之後由每日的子議題發現流程自動新增、整併；每週 Issue 會列出變動供人工審核。
+# 子議題指「持續性的議題」，不是單一事件（單一事件由事件分群處理）。
+subtopics:
+  - id: taipei_mayor_2026
+    topic: elections
+    name: 台北市長選舉
+    desc: "2026 台北市長選舉（蔣萬安、沈伯洋等）的選戰、辯論與民調"
+  - id: newtaipei_mayor_2026
+    topic: elections
+    name: 新北市長選舉
+    desc: "2026 新北市長選舉（李四川、蘇巧慧等）"
+  - id: taoyuan_mayor_2026
+    topic: elections
+    name: 桃園市長選舉
+    desc: "2026 桃園市長選舉（張善政、黃世杰等）"
+  - id: taichung_mayor_2026
+    topic: elections
+    name: 台中市長選舉
+    desc: "2026 台中市長選舉（江啟臣、何欣純等）"
+  - id: tainan_mayor_2026
+    topic: elections
+    name: 台南市長選舉
+    desc: "2026 台南市長選舉（謝龍介、陳亭妃等）"
+  - id: kaohsiung_mayor_2026
+    topic: elections
+    name: 高雄市長選舉
+    desc: "2026 高雄市長選舉（柯志恩、賴瑞隆等）"
+  - id: county_races_2026
+    topic: elections
+    name: 縣市長與議員選舉
+    desc: "六都以外的縣市長選舉，以及各地議員、鄉鎮市長選舉"
+  - id: blue_white_cooperation
+    topic: elections
+    name: 藍白合作與政黨競合
+    desc: "國民黨與民眾黨的合作、分歧與政黨間的整體選戰布局"
+  - id: national_day_2026
+    topic: governance
+    name: 國慶演說與元首論述
+    desc: "總統國慶演說、立法院長等人的回應與後續攻防"
+  - id: special_defense_budget
+    topic: defense_policy
+    name: 國防特別預算與軍購
+    desc: "國防特別條例（7,800 億）與後續預算、對美軍購付款與交運"
+  - id: drone_procurement
+    topic: defense_policy
+    name: 無人機國家隊與國防採購爭議
+    desc: "國產無人機、中製零件、國防採購弊案"
+  - id: military_personnel
+    topic: defense_policy
+    name: 國軍人事與部隊事件
+    desc: "飛官等人力流失、部隊霸凌與意外、軍紀"
+  - id: songshan_airport_relocation
+    topic: economy_livelihood
+    name: 松山機場遷建
+    desc: "松山機場遷建或轉型的政策與國防影響爭議"
+  - id: prc_drills
+    topic: pla_activity
+    name: 共軍對台軍演
+    desc: "共軍針對台灣的軍事演習與海空活動"
+  - id: prc_pressure_on_allies
+    topic: allies_participation
+    name: 中國打壓邦交國
+    desc: "中國對台灣邦交國或其官員的制裁、利誘與挖角"
+  - id: trump_xi_taiwan
+    topic: us_relations
+    name: 美中峰會與台灣議題
+    desc: "川普亞洲行、川習會等美中互動中涉及台灣的部分"
+  - id: us_tariffs_trade
+    topic: us_relations
+    name: 台美關稅與貿易協定
+    desc: "美國對台關稅、232 條款、台美貿易協定談判"
+  - id: kmt_china_exchanges
+    topic: exchanges_parties
+    name: 國民黨與中共交流
+    desc: "國民黨主席與黨內人士訪中、國共論壇與鄭習會相關"
+  - id: espionage_cases
+    topic: united_front_security
+    name: 共諜與滲透案件
+    desc: "共諜起訴與判決、軍中與政府部門滲透"
+  - id: legislative_executive_conflict
+    topic: legislature
+    name: 行政立法對立
+    desc: "藍白多數國會與行政院之間的法案、覆議、預算與職權爭議"

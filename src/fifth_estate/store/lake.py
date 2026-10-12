@@ -46,7 +46,7 @@ def write(table: str, rows: Iterable[dict[str, Any]], run_id: str, day: date | N
     cols = {name: [r.get(name) for r in rows] for name in schema.names}
     tbl = pa.Table.from_pydict(cols, schema=schema)
     d = day or taipei_today()
-    out = table_dir(table) / f"date={d.isoformat()}" / f"{run_id}.parquet"
+    out = table_dir(table) / f"date={d.isoformat()}" / f"{run_id}-{secrets.token_hex(2)}.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".parquet.tmp")
     pq.write_table(tbl, tmp, compression="zstd")
@@ -114,6 +114,8 @@ def _duck_type(t: pa.DataType) -> str:
         return "BOOLEAN"
     if pa.types.is_timestamp(t):
         return "TIMESTAMPTZ"
+    if pa.types.is_date(t):
+        return "DATE"
     if pa.types.is_binary(t):
         return "BLOB"
     if pa.types.is_list(t):
