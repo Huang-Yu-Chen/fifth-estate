@@ -153,6 +153,84 @@ def publish(
     _report("export", site_data.export(out_dir=out, public_dir=site_data.PUBLIC_DATA if daily else None), summary)
 
 
+@app.command("gold-sample")
+def gold_sample(
+    name: str = typer.Option("gold"),
+    n: int = typer.Option(150),
+    days: int = typer.Option(14),
+    weekly: bool = typer.Option(False, help="MBD weekly check: 2 per lean bucket + ≥1 per outlet"),
+) -> None:
+    """Draw a stratified set of articles for human labeling (saved in the data repo)."""
+    from .validate import sample
+
+    ids = sample.weekly(days=7) if weekly else sample.gold(n=n, days=days)
+    path = sample.save(name, ids)
+    console.print(f"{len(ids)} articles → {path}")
+
+
+@app.command()
+def label(set_name: str = typer.Option("gold", "--set"), coder: str = typer.Option(..., help="Your name/initials"), port: int = 8765) -> None:
+    """Open the local labeling page (source-blinded, no model scores)."""
+    from .validate import label_app
+
+    label_app.serve(set_name, coder, port)
+
+
+@app.command("eval")
+def evaluate_models(
+    set_name: str = typer.Option("gold", "--set"),
+    coder: str = typer.Option(...),
+    models: str = typer.Option("gpt-6-luna:medium,gpt-6.1-sol:low,gpt-6-astra:low"),
+    coder2: str = typer.Option(None, help="Second human coder for human–human agreement"),
+    skip_predict: bool = typer.Option(False),
+) -> None:
+    """Bake-off: run each model on the labeled set, then report agreement with the human labels."""
+    from .validate import evaluate
+
+    specs = [m.strip() for m in models.split(",") if m.strip()]
+    if not skip_predict:
+        for s in specs:
+            _report("predict", evaluate.predict(set_name, s))
+    console.print(evaluate.report(set_name, coder, specs, coder2))
+
+
+@app.command("weekly-report")
+def weekly_report(out: str = typer.Option(..., help="Markdown file to write")) -> None:
+    """Scraper health, LLM spend, subtopic changes and the week's validation sample (for the weekly Issue)."""
+    from pathlib import Path
+
+    from .config import data_dir
+    from .store import lake
+    from .validate import sample
+
+    week = lake.taipei_today().strftime("%G-W%V")
+    ids = sample.weekly(days=7)
+    sample.save(f"weekly-{week}", ids)
+    health = lake.rows(
+        f"""SELECT outlet_id, count(*) FILTER (WHERE status = 'ok') AS ok,
+                   count(*) FILTER (WHERE status IN ('http_error', 'extract_failed')) AS failed,
+                   max(created_at) FILTER (WHERE status = 'ok') AS last_ok
+            FROM {lake.source('fetches', 7)} GROUP BY outlet_id ORDER BY outlet_id"""
+    )
+    spend = lake.rows(f"SELECT task, model, round(sum(cost_usd), 3) AS usd, sum(n_requests) AS req FROM {lake.source('llm_usage', 7)} GROUP BY ALL ORDER BY usd DESC")
+    changelog = data_dir() / "registry" / "changelog.md"
+    lines = [f"## 第五權週報 {week}", "", "### 抓取健康度（近 7 天）", "", "| 媒體 | 成功 | 失敗 | 最後成功 |", "|---|---|---|---|"]
+    from .config import TAIPEI
+
+    lines += [f"| {h['outlet_id']} | {h['ok']} | {h['failed']} | {h['last_ok'].astimezone(TAIPEI):%m-%d %H:%M} |" if h["last_ok"]
+              else f"| {h['outlet_id']} | {h['ok']} | {h['failed']} | **24 小時以上沒有成功抓取** |" for h in health]
+    lines += ["", "### LLM 花費（近 7 天）", "", "| 任務 | 模型 | 美元 | 請求數 |", "|---|---|---|---|"]
+    lines += [f"| {s['task']} | {s['model']} | {s['usd']} | {s['req']} |" for s in spend]
+    lines += ["", "### 子議題變動（自動新增，請檢查名稱是否中性、是否該合併）", ""]
+    lines += [ln for ln in (changelog.read_text(encoding="utf-8").splitlines()[-30:] if changelog.exists() else ["（無）"])]
+    lines += ["", f"### 本週驗證抽樣（{len(ids)} 篇，MBD 作法：每個五級分組 2 篇、每家媒體至少 1 篇）", "",
+              "在筆電上：`cd ~/fifth-estate-data && git pull`，然後",
+              f"`cd ~/fifth-estate && uv run fifth label --set weekly-{week} --coder <你的名字>`，標完後 `cd ~/fifth-estate-data && git add validation && git commit -m labels && git push`。",
+              f"之後可以跑 `uv run fifth eval --set weekly-{week} --coder <你的名字> --skip-predict --models \"\"` 看一致性。"]
+    Path(out).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    console.print(f"weekly report → {out}")
+
+
 @app.command()
 def stats(days: int = typer.Option(3)) -> None:
     """Article counts per outlet and day."""
