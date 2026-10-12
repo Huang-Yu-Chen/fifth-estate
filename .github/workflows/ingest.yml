@@ -1,0 +1,76 @@
+name: ingest
+# Hourly: discover and fetch new political articles from every outlet, then annotate
+# (Stage 1 / Stage 2) and embed, and commit the new Parquet partitions to the private data repo.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      since_hours:
+        description: Ignore candidates published before this many hours ago
+        default: "36"
+      max_fetch:
+        description: Max article fetches per outlet
+        default: "150"
+permissions:
+  contents: read
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TZ: Asia/Taipei
+      FIFTH_DATA_DIR: ${{ github.workspace }}/data
+    steps:
+      - uses: actions/checkout@v7
+      - name: Data partitions to check out
+        id: paths
+        run: |
+          {
+            echo 'patterns<<EOF'
+            echo '/state/'
+            echo '/registry/'
+            for i in $(seq -1 7); do
+              d=$(date -d "-$i day" +%F)
+              for t in fetches articles article_flags stage1 stage2 subtopic_assignments embeddings llm_usage; do
+                echo "/$t/date=$d/"
+              done
+            done
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          repository: Huang-Yu-Chen/fifth-estate-data
+          ssh-key: ${{ secrets.DATA_REPO_DEPLOY_KEY }}
+          path: data
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: ${{ steps.paths.outputs.patterns }}
+          sparse-checkout-cone-mode: false
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Ingest
+        run: >-
+          uv run fifth ingest
+          --since-hours "${{ inputs.since_hours || '36' }}"
+          --max-fetch "${{ inputs.max_fetch || '150' }}"
+          --summary "$GITHUB_STEP_SUMMARY"
+      - name: Commit data
+        if: always()
+        working-directory: data
+        run: |
+          git config user.name "fifth-estate-bot"
+          git config user.email "fifth-estate-bot@users.noreply.github.com"
+          git add --sparse -A
+          if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
+          git commit -q -m "ingest $(date +%FT%H:%M%z)"
+          for i in 1 2 3 4 5; do
+            if git pull -q --rebase && git push -q; then exit 0; fi
+            sleep $((i * 10))
+          done
+          exit 1

@@ -1,0 +1,163 @@
+# 第五權 — 媒體與收集來源設定
+#
+# 每家媒體由「發現來源」(sources) 找出候選網址，再依版面規則過濾：
+#   url_include / url_exclude：網址正規表示式，在抓取前先過濾（可省下不必要的抓取）
+#   allow_sections：抓取後依文章頁的版面路徑（麵包屑／JSON-LD，如「要聞>政治」）過濾；
+#                   未設定或抽不到版面時一律保留，交給 Stage 1 判斷是否為台灣政治新聞
+# 範圍：各家的政治、選舉、軍事、兩岸、國際版（國際版用來涵蓋涉台外交新聞）。
+#
+# source.type：
+#   rss          RSS／Atom
+#   news_sitemap Google News sitemap（含 news:publication_date、news:title）
+#   sitemap_index 指向多個 news sitemap 的索引
+#   listing      版面列表頁（伺服器端渲染），以 link_pattern 抓文章連結
+#   yahoo_provider Yahoo 奇摩新聞的供稿者封存頁（用於被 Cloudflare 擋的媒體）
+
+user_agent: "FifthEstateBot/0.1 (+https://github.com/Huang-Yu-Chen/fifth-estate)"
+per_domain_interval_sec: 1.0
+request_timeout_sec: 20
+max_fetch_attempts: 3
+
+outlets:
+  - id: ltn
+    name: 自由時報
+    short: 自由
+    self_names: [自由時報, 自由時報電子報, 自由電子報, 自由財經]
+    sources:
+      - {type: rss, url: "https://news.ltn.com.tw/rss/politics.xml"}
+      - {type: rss, url: "https://news.ltn.com.tw/rss/world.xml"}
+      - {type: news_sitemap, url: "https://news.ltn.com.tw/sitemap.xml"}
+    url_include: ['news\.ltn\.com\.tw/news/(politics|world|focus)/']
+
+  - id: udn
+    name: 聯合新聞網
+    short: 聯合
+    self_names: [聯合新聞網, 聯合報, 經濟日報, udn]
+    sources:
+      - {type: sitemap_index, url: "https://udn.com/sitemap/gnews/2"}
+    url_include: ['udn\.com/news/story/\d+/\d+']
+    # 聯合的版面代碼在網址裡（/news/story/{版面代碼}/{id}）。未知代碼會先抓一篇判斷版面，
+    # 之後同代碼直接沿用判斷結果（記在資料 repo 的 state/section_keys.json）。
+    section_key: 'udn\.com/news/story/(\d+)/'
+    allow_sections: ['^要聞>', '^兩岸>', '^全球>']
+    deny_sections: ['^要聞>(社會|生活|產經|運動|娛樂|股市)']
+
+  - id: chinatimes
+    name: 中時新聞網
+    short: 中時
+    self_names: [中時新聞網, 中國時報, 中時, 旺報, 工商時報]
+    via: yahoo
+    sources:
+      - {type: yahoo_provider, provider: "chinatimes.com.tw", label: 中時新聞網}
+    allow_sections: ['^(政治|國際|即時)']
+
+  - id: cna
+    name: 中央社
+    short: 中央社
+    self_names: [中央社, 中央通訊社, CNA]
+    sources:
+      - {type: rss, url: "https://feeds.feedburner.com/rsscna/politics"}
+      - {type: rss, url: "https://feeds.feedburner.com/rsscna/mainland"}
+      - {type: rss, url: "https://feeds.feedburner.com/rsscna/intworld"}
+      - {type: news_sitemap, url: "https://www.cna.com.tw/GoogleNewsSitemap_fromRemote_cfp.xml"}
+    url_include: ['cna\.com\.tw/news/(aipl|acn|aopl)/']
+
+  - id: pts
+    name: 公視新聞網
+    short: 公視
+    self_names: [公視新聞網, 公視, 公共電視, PNN]
+    sources:
+      - {type: listing, url: "https://news.pts.org.tw/category/1", link_pattern: '/article/\d+'}
+      - {type: listing, url: "https://news.pts.org.tw/category/4", link_pattern: '/article/\d+'}
+      - {type: news_sitemap, url: "https://news.pts.org.tw/xml/sitemap.xml"}
+    url_include: ['news\.pts\.org\.tw/article/\d+']
+    allow_sections: ['^(政治|國際|全球|兩岸)']
+
+  - id: ettoday
+    name: ETtoday新聞雲
+    short: ETtoday
+    self_names: [ETtoday新聞雲, ETtoday, 東森新聞雲]
+    sources:
+      - {type: rss, url: "https://feeds.feedburner.com/ettoday/news"}
+      - {type: rss, url: "https://feeds.feedburner.com/ettoday/china"}
+      - {type: rss, url: "https://feeds.feedburner.com/ettoday/global"}
+    url_include: ['ettoday\.net/news/\d{8}/\d+\.htm']
+
+  - id: setn
+    name: 三立新聞網
+    short: 三立
+    self_names: [三立新聞網, 三立新聞, 三立, SETN]
+    date_quirk: naive_local      # JSON-LD 把台灣時間標成 +00:00
+    sources:
+      - {type: listing, url: "https://www.setn.com/viewall/politics", link_pattern: '/news/\d+'}
+      - {type: listing, url: "https://www.setn.com/viewall/china", link_pattern: '/news/\d+'}
+      - {type: listing, url: "https://www.setn.com/viewall/world", link_pattern: '/news/\d+'}
+    url_include: ['setn\.com/news/\d+']
+    allow_sections: ['^(政治|兩岸|國際)']
+
+  - id: tvbs
+    name: TVBS新聞網
+    short: TVBS
+    self_names: [TVBS新聞網, TVBS新聞, TVBS]
+    sources:
+      - {type: news_sitemap, url: "https://news.tvbs.com.tw/sitemap/news-sitemap"}
+      - {type: listing, url: "https://news.tvbs.com.tw/politics", link_pattern: '/politics/\d+'}
+    url_include: ['news\.tvbs\.com\.tw/(politics|china|world)/\d+']
+
+  - id: ftv
+    name: 民視新聞網
+    short: 民視
+    self_names: [民視新聞網, 民視新聞, 民視]
+    via: yahoo
+    sources:
+      - {type: yahoo_provider, provider: "ftvn.com.tw", label: 民視}
+    allow_sections: ['^(政治|國際|即時)']
+
+  - id: ebc
+    name: 東森新聞
+    short: 東森
+    self_names: [東森新聞, EBC東森新聞, 東森]
+    sources:
+      - {type: news_sitemap, url: "https://news.ebc.net.tw/sitemap/realtime.xml"}
+    url_include: ['news\.ebc\.net\.tw/news/(politics|world|china)/\d+']
+
+  - id: cti
+    name: 中天新聞網
+    short: 中天
+    self_names: [中天新聞網, 中天新聞, 中天]
+    sources:
+      - {type: rss, url: "https://ctinews.com/rss/google-news.xml", tags: [要聞, 大陸, 國際]}
+      - {type: listing, url: "https://ctinews.com/news/topics/6KG96z9gEA", link_pattern: '/news/items/\w+'}
+      - {type: listing, url: "https://ctinews.com/news/topics/Wqk9W8eD3M", link_pattern: '/news/items/\w+'}
+    url_include: ['ctinews\.com/news/items/\w+']
+    allow_sections: ['^(要聞|大陸|國際)']
+
+  - id: storm
+    name: 風傳媒
+    short: 風傳媒
+    self_names: [風傳媒, Storm Media]
+    sources:
+      - {type: listing, url: "https://www.storm.mg/channel/7", link_pattern: '/article/\d+'}
+      - {type: listing, url: "https://www.storm.mg/channel/10", link_pattern: '/article/\d+'}
+    url_include: ['storm\.mg/article/\d+']
+    allow_sections: ['政治', '國際', '兩岸']
+
+  - id: newtalk
+    name: 新頭殼
+    short: 新頭殼
+    self_names: [新頭殼, Newtalk新聞, Newtalk]
+    sources:
+      - {type: rss, url: "https://newtalk.tw/rss/category/2"}
+      - {type: rss, url: "https://newtalk.tw/rss/category/7"}
+      - {type: rss, url: "https://newtalk.tw/rss/category/13"}
+      - {type: rss, url: "https://newtalk.tw/rss/category/1"}
+    url_include: ['newtalk\.tw/news/view/']
+
+  - id: mirror
+    name: 鏡週刊
+    short: 鏡週刊
+    self_names: [鏡週刊, 鏡週刊 Mirror Media, Mirror Media, 鏡新聞]
+    sources:
+      - {type: listing, url: "https://www.mirrormedia.mg/section/politicsocial", link_pattern: '/story/[\w-]+'}
+    url_include: ['mirrormedia\.mg/story/']
+    url_exclude: ['/premium/']
