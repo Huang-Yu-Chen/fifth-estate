@@ -265,7 +265,7 @@ def try_prompt(
         if m.get("china_reason") and m.get("china_relevance"):
             lines.append(f"  - china: {m.get('china_reason')}")
     text = "\n".join(lines) + "\n"
-    console.print(text)
+    print(text)  # plain print: titles contain [brackets] that rich would treat as markup
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
             f.write(text)
