@@ -1,9 +1,10 @@
 name: publish
 # Every 3 hours: wire flags → events → metrics/polarization → dashboard JSON → GitHub Pages.
-# The 23:47 (Taipei) run also does subtopic discovery and commits a small public snapshot to public-data/.
+# The first run after 20:00 (Taipei) each day also does subtopic discovery and commits a small public
+# snapshot to public-data/ (scheduled runs can be dropped, so this is not tied to one exact run).
 on:
   schedule:
-    - cron: "47 */3 * * *"
+    - cron: "27,57 */3 * * *"
   workflow_dispatch:
     inputs:
       daily:
@@ -29,7 +30,11 @@ jobs:
       - name: Daily run?
         id: when
         run: |
-          if [ "${{ inputs.daily }}" = "true" ] || [ "$(date +%H)" = "23" ]; then echo "daily=true" >> "$GITHUB_OUTPUT"; else echo "daily=false" >> "$GITHUB_OUTPUT"; fi
+          if [ "${{ inputs.daily }}" = "true" ] || { [ "$(date +%H)" -ge 20 ] && [ ! -f "public-data/$(date +%F).json" ]; }; then
+            echo "daily=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "daily=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Data partitions to check out
         id: paths
         run: |

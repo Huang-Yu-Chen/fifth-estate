@@ -1,9 +1,10 @@
 name: ingest
 # Hourly: discover and fetch new political articles from every outlet, then annotate
 # (Stage 1 / Stage 2) and embed, and commit the new Parquet partitions to the private data repo.
+# Two triggers per hour because GitHub drops many scheduled runs; a run that finds nothing new is quick.
 on:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch:
     inputs:
       since_hours:
