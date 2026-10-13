@@ -1,0 +1,119 @@
+name: publish
+# Every 3 hours: wire flags → events → metrics/polarization → dashboard JSON → GitHub Pages.
+# The 23:47 (Taipei) run also does subtopic discovery and commits a small public snapshot to public-data/.
+on:
+  schedule:
+    - cron: "47 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      daily:
+        description: Run the daily jobs too
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: publish
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: write   # public-data snapshot commit
+    env:
+      TZ: Asia/Taipei
+      FIFTH_DATA_DIR: ${{ github.workspace }}/data
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Daily run?
+        id: when
+        run: |
+          if [ "${{ inputs.daily }}" = "true" ] || [ "$(date +%H)" = "23" ]; then echo "daily=true" >> "$GITHUB_OUTPUT"; else echo "daily=false" >> "$GITHUB_OUTPUT"; fi
+      - name: Data partitions to check out
+        id: paths
+        run: |
+          {
+            echo 'patterns<<EOF'
+            echo '/state/'
+            echo '/registry/'
+            for i in $(seq -1 96); do
+              d=$(date -d "-$i day" +%F)
+              for t in articles stage1 stage2 subtopic_assignments article_flags event_members; do echo "/$t/date=$d/"; done
+              if [ "$i" -le 20 ]; then echo "/events/date=$d/"; fi
+              if [ "$i" -le 5 ]; then echo "/embeddings/date=$d/"; fi
+              if [ "$i" -le 2 ]; then echo "/llm_usage/date=$d/"; fi
+            done
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: Huang-Yu-Chen/fifth-estate-data
+          ssh-key: ${{ secrets.DATA_REPO_DEPLOY_KEY }}
+          path: data
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: ${{ steps.paths.outputs.patterns }}
+          sparse-checkout-cone-mode: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Publish
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: >-
+          uv run fifth publish --summary "$GITHUB_STEP_SUMMARY"
+          ${{ steps.when.outputs.daily == 'true' && '--daily' || '' }}
+      - name: Commit data
+        if: always()
+        working-directory: data
+        run: |
+          git config user.name "fifth-estate-bot"
+          git config user.email "fifth-estate-bot@users.noreply.github.com"
+          git add --sparse -A
+          if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
+          git commit -q -m "publish $(date +%FT%H:%M%z)"
+          for i in 1 2 3 4 5; do
+            if git pull -q --rebase && git push -q; then exit 0; fi
+            sleep $((i * 10))
+          done
+          exit 1
+      - name: Commit public snapshot
+        if: steps.when.outputs.daily == 'true'
+        run: |
+          git config user.name "fifth-estate-bot"
+          git config user.email "fifth-estate-bot@users.noreply.github.com"
+          git add public-data
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -q -m "public snapshot $(date +%F)"
+          for i in 1 2 3; do
+            if git pull -q --rebase && git push -q; then exit 0; fi
+            sleep $((i * 10))
+          done
+          exit 1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build dashboard
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: web/dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5.0.1

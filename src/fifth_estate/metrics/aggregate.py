@@ -10,7 +10,7 @@ from statistics import mean, pstdev
 
 from ..cluster import taxonomy
 from ..cluster.events import latest_run
-from ..config import load_yaml
+from ..config import TAIPEI, load_yaml
 from ..llm.schemas import IN_SCOPE, NEWS_TYPES
 from ..store import lake
 from .polarization import Params, attention_skew, polarization
@@ -186,7 +186,7 @@ def trend(rows: list[dict], outlet_totals_fn, baseline: dict[str, float], p: Par
     quick = Params(**{**p.__dict__, "bootstrap": 0})
     out = []
     for d in range(days - 1, -1, -1):
-        end = (now - timedelta(days=d)).replace(hour=23, minute=59, second=59)
+        end = (now.astimezone(TAIPEI) - timedelta(days=d)).replace(hour=23, minute=59, second=59)  # Taipei calendar days
         start = end - timedelta(days=span)
         rs = [r for r in rows if r["published_at"] and start < r["published_at"] <= end]
         if not rs:

@@ -108,14 +108,27 @@ async def ingest_outlet(
                 continue
         todo.append((cu, c, key))
 
-    # Newest first; keys we have never seen are probed first so later items can be decided cheaply.
-    todo.sort(key=lambda t: (t[2] is None or t[2] in keys, -(t[1].published_hint.timestamp() if t[1].published_hint else now.timestamp())))
+    # Newest first. For outlets with section codes in the URL, probe one article per never-seen code
+    # first; the rest of that code's articles wait until the probe has decided allow/deny.
+    todo.sort(key=lambda t: -(t[1].published_hint.timestamp() if t[1].published_hint else now.timestamp()))
+    probes, known, waiting, probe_keys = [], [], [], set()
+    for t in todo:
+        key = t[2]
+        if key and key not in keys:
+            (waiting if key in probe_keys else probes).append(t)
+            probe_keys.add(key)
+        else:
+            known.append(t)
+    todo = probes + known + waiting
     rep.new = len(todo)
-    probed_deny: set[str] = set()
+    fetched = 0
 
-    for cu, c, key in todo[:max_fetch]:
-        if key and (keys.get(key) == "deny" or key in probed_deny):
-            continue
+    for cu, c, key in todo:
+        if fetched >= max_fetch:
+            break
+        if key and keys.get(key) == "deny":
+            continue  # decided by a probe earlier in this run; costs nothing
+        fetched += 1
         row = {
             "run_id": run_id,
             "outlet_id": outlet.id,
@@ -143,8 +156,6 @@ async def ingest_outlet(
                     allowed = _section_allowed(outlet, ex.section)
                     if key and allowed is not None and key not in keys:
                         keys[key] = "allow" if allowed else "deny"
-                        if not allowed:
-                            probed_deny.add(key)
                     published = ex.published_at or c.published_hint
                     if not dates.plausible(published):
                         published = c.published_hint if dates.plausible(c.published_hint) else None

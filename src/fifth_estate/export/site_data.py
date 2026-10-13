@@ -172,6 +172,7 @@ def export(out_dir: Path = SITE_DATA, public_dir: Path | None = PUBLIC_DATA) -> 
     meta = {
         "generated_at": _iso(now),
         "fake_data": bool(fake),
+        "site": load_yaml("pipeline.yaml").get("site", {}),
         "windows": windows,
         "outlets": outlet_meta,
         "categories": tax.categories,
