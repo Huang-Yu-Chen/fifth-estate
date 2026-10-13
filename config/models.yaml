@@ -40,5 +40,6 @@ budget:
 
 # 每次排程最多處理幾篇（避免第一次執行或積壓時一次花太多錢）
 limits:
-  stage1_per_run: 400
-  stage2_per_run: 400
+  stage1_per_run: 600
+  stage1_minutes: 30     # 單次排程中 Stage 1 最多跑幾分鐘（剩下的留給下一次）
+  stage2_per_run: 600

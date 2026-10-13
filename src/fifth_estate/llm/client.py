@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -106,6 +107,7 @@ class Result:
     error: str | None
     usage: dict[str, int]
     service_tier: str
+    latency: float | None = None
 
 
 def _usage(u: Any) -> dict[str, int]:
@@ -173,11 +175,14 @@ async def call_async(
     """One request. Flex 429s ("resource unavailable") are retried, then fall back to default."""
     delay = 5.0
     last = "unknown error"
+    t0 = time.monotonic()
     for i in range(attempts):
         use_tier = tier if not (tier == "flex" and i >= 3) else "default"
         try:
             resp = await client.responses.create(**body, service_tier=use_tier)
-            return parse_response(resp, schema, use_tier)
+            res = parse_response(resp, schema, use_tier)
+            res.latency = time.monotonic() - t0
+            return res
         except RateLimitError as e:
             last = f"RateLimitError: {e}"
         except (APITimeoutError, APIConnectionError, InternalServerError) as e:

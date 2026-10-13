@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+from collections import Counter
 
 from openai.lib._parsing._responses import type_to_text_format_param
 
 from ..cluster import taxonomy
+from ..config import load_yaml
 from ..llm import client as llm
 from ..llm.schemas import IN_SCOPE, stage1_model
 from ..store import lake
@@ -16,7 +19,8 @@ from .common import CLEAN_VERSION, article_text, render_prompt
 
 log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
-CONCURRENCY = 8
+CONCURRENCY = 24
+FLUSH_EVERY = 50
 
 
 def select_pending(limit: int, days: int = 7) -> list[dict]:
@@ -86,34 +90,50 @@ def to_row(article_id: str, res: llm.Result, cfg: llm.TaskConfig, phash: str, ta
     return row
 
 
-async def _run(articles: list[dict], run_id: str) -> tuple[list[dict], list[llm.Result]]:
+async def _run(articles: list[dict], run_id: str, minutes: float) -> tuple[list[dict], list[llm.Result]]:
+    """Calls run concurrently; finished rows are flushed to the lake every FLUSH_EVERY results so a
+    killed job keeps its work, and no new request starts after `minutes` (the rest waits for the next run)."""
     cfg, system, schema, phash, tax = setup()
     budget_left = llm.daily_budget() - llm.spent_today()
+    deadline = time.monotonic() + minutes * 60
     client = llm.async_client()
     sem = asyncio.Semaphore(CONCURRENCY)
     spent = 0.0
     rows: list[dict] = []
+    pending: list[dict] = []
     results: list[llm.Result] = []
+
+    def flush() -> None:
+        if pending:
+            lake.write("stage1", pending, run_id)
+            pending.clear()
 
     async def one(a: dict) -> None:
         nonlocal spent
         async with sem:
-            if spent >= budget_left:
+            if spent >= budget_left or time.monotonic() > deadline:
                 return
             body = llm.build_body(cfg, system, article_text(a, with_section=True), schema)
             res = await llm.call_async(client, body, schema, cfg.service_tier)
             spent += llm.cost_usd(cfg.model, res.usage, res.service_tier)
             results.append(res)
-            rows.append(to_row(a["article_id"], res, cfg, phash, tax, run_id))
+            row = to_row(a["article_id"], res, cfg, phash, tax, run_id)
+            rows.append(row)
+            pending.append(row)
+            if len(pending) >= FLUSH_EVERY:
+                flush()
 
     await asyncio.gather(*(one(a) for a in articles))
     await client.close()
+    flush()
     if spent >= budget_left:
         log.warning("daily LLM budget reached; stage1 stopped early")
+    if time.monotonic() > deadline:
+        log.warning("stage1 time budget reached; the rest is left for the next run")
     return rows, results
 
 
-def run(limit: int, run_id: str | None = None) -> dict:
+def run(limit: int, run_id: str | None = None, minutes: float | None = None) -> dict:
     run_id = run_id or lake.new_run_id()
     articles = select_pending(limit)
     if not articles:
@@ -121,10 +141,12 @@ def run(limit: int, run_id: str | None = None) -> dict:
     if llm.spent_today() >= llm.daily_budget():
         log.warning("daily LLM budget already spent; skipping stage1")
         return {"processed": 0, "budget_exhausted": True}
-    rows, results = asyncio.run(_run(articles, run_id))
-    lake.write("stage1", rows, run_id)
+    minutes = minutes if minutes is not None else float(load_yaml("models.yaml")["limits"].get("stage1_minutes", 30))
+    t0 = time.monotonic()
+    rows, results = asyncio.run(_run(articles, run_id, minutes))
     cfg = llm.task_config("stage1")
     cost = llm.record_usage("stage1", cfg.model, cfg.service_tier, results, run_id)
+    lat = sorted(r.latency for r in results if r.latency is not None)
     ok = [r for r in rows if r["status"] == "ok"]
     return {
         "processed": len(rows),
@@ -132,5 +154,8 @@ def run(limit: int, run_id: str | None = None) -> dict:
         "in_scope": sum(1 for r in ok if r["scope"] in IN_SCOPE),
         "errors": len(rows) - len(ok),
         "cost_usd": round(cost, 4),
+        "minutes": round((time.monotonic() - t0) / 60, 1),
+        "median_latency_s": round(lat[len(lat) // 2], 1) if lat else None,
+        "tiers": json.dumps(dict(Counter(r.service_tier for r in results))),
         "scopes": json.dumps({s: sum(1 for r in ok if r["scope"] == s) for s in {r["scope"] for r in ok}}, ensure_ascii=False),
     }
