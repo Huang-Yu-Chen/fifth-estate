@@ -1,10 +1,12 @@
 name: ingest
 # Hourly: discover and fetch new political articles from every outlet, then annotate
 # (Stage 1 / Stage 2) and embed, and commit the new Parquet partitions to the private data repo.
-# Two triggers per hour because GitHub drops many scheduled runs; a run that finds nothing new is quick.
+# Primary trigger: Google Cloud Scheduler (job fifth-estate-ingest, :07 every hour, see
+# scripts/setup_cloud_scheduler.sh) — GitHub's own cron dropped almost every run for this repo.
+# The cron below is only a backup, offset by half an hour; a run that finds nothing new is quick.
 on:
   schedule:
-    - cron: "7,37 * * * *"
+    - cron: "37 * * * *"
   workflow_dispatch:
     inputs:
       since_hours:

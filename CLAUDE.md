@@ -4,6 +4,10 @@ Taiwanese political-news polarization tracker modeled on UPenn's Media Bias Dete
 Code: this public repo. Data (full text + labels): private repo `Huang-Yu-Chen/fifth-estate-data`
 (checked out next to this repo as `../fifth-estate-data`, or set `FIFTH_DATA_DIR`). Site: GitHub Pages.
 
+Scheduling: Google Cloud Scheduler jobs `fifth-estate-ingest` (hourly :07) and `fifth-estate-publish`
+(every 3 h :27) in project `project-ec3ab1fc-4d15-40e8-a92`, region asia-east1, call workflow_dispatch with a
+fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`). GitHub cron is backup only.
+
 ## Commands
 - `uv run fifth ingest|annotate|stage1|stage2|embed|publish|stats` — pipeline steps (see `src/fifth_estate/cli.py`)
 - `uv run fifth gold-sample | label --coder X | eval --coder X --models a:low,b:low` — validation

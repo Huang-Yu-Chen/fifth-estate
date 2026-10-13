@@ -2,9 +2,10 @@ name: publish
 # Every 3 hours: wire flags → events → metrics/polarization → dashboard JSON → GitHub Pages.
 # The first run after 20:00 (Taipei) each day also does subtopic discovery and commits a small public
 # snapshot to public-data/ (scheduled runs can be dropped, so this is not tied to one exact run).
+# Primary trigger: Google Cloud Scheduler (job fifth-estate-publish, :27 every 3 hours); cron is a backup.
 on:
   schedule:
-    - cron: "27,57 */3 * * *"
+    - cron: "57 */3 * * *"
   workflow_dispatch:
     inputs:
       daily:

@@ -15,6 +15,10 @@ GitHub Actions（本 repo）
 私有 repo fifth-estate-data：新聞全文與標註（Parquet，DuckDB 查詢）
 ```
 
+排程由 Google Cloud Scheduler（台灣機房）呼叫 GitHub 的 workflow_dispatch 觸發；GitHub 自己的 cron 只當備援，
+因為它在這個 repo 幾乎每次都被略過。設定方式見 `scripts/setup_cloud_scheduler.sh`（需要一個只限本 repo、
+只有 Actions 讀寫權限的 GitHub token，一年到期後重跑一次即可）。
+
 新聞全文只存在私有 repo；公開網站只放標題、連結、分數與簡短理由。
 
 ## 本機開發
