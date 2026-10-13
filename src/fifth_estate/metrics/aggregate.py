@@ -173,7 +173,7 @@ def units_for(rows: list[dict], tax: taxonomy.Taxonomy, events: dict[str, dict])
         if t:
             add("topic", t["id"], t["name"], r)
         sid = tax.resolve(r["subtopic_id"])
-        sub = next((s for s in tax.subtopics if s.id == sid), None)
+        sub = next((s for s in tax.subtopics if s.id == sid and s.status == "active"), None)
         if sub:
             add("subtopic", sub.id, sub.name, r)
         if r["event_id"] and r["event_id"] in events:

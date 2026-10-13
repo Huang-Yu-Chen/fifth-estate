@@ -19,7 +19,7 @@ from . import taxonomy
 
 log = logging.getLogger(__name__)
 MIN_GROUP = 5          # only look at topics with at least this many 'other' articles
-MIN_NEW_MEMBERS = 3
+MIN_NEW_MEMBERS = 4
 MAX_ITEMS = 120
 CHANGELOG = "registry/changelog.md"
 
@@ -44,9 +44,9 @@ def _others(days: int) -> list[dict]:
 
 def _user_text(tax: taxonomy.Taxonomy, topic_id: str, items: list[dict]) -> str:
     t = tax.topic(topic_id)
-    lines = [f"議題：{t['id']}｜{t['name']}：{t['description']}", "", "現有子議題："]
-    subs = tax.active_subtopics(topic_id)
-    lines += [f"- {s.id}｜{s.name}：{s.desc}" for s in subs] or ["（無）"]
+    lines = [f"議題：{t['id']}｜{t['name']}：{t['description']}", "", "現有子議題（所有議題）："]
+    subs = tax.active_subtopics()
+    lines += [f"- {s.id}（{s.topic}）｜{s.name}：{s.desc}" for s in subs] or ["（無）"]
     lines += ["", "標為「其他」的報導："]
     settings = ingest_settings()
     for i, r in enumerate(items):
@@ -95,7 +95,7 @@ def run(days: int = 7, run_id: str | None = None) -> dict:
         for prop in res.parsed.proposals:
             members = [items[i] for i in prop.member_indices if 0 <= i < len(items)]
             target = None
-            if prop.action == "merge_into_existing" and prop.existing_subtopic_id in {s.id for s in tax.active_subtopics(topic_id)}:
+            if prop.action == "merge_into_existing" and prop.existing_subtopic_id in {s.id for s in tax.active_subtopics()}:
                 target = prop.existing_subtopic_id
             elif prop.action == "new" and len(members) >= MIN_NEW_MEMBERS and prop.name:
                 new_id = _slug(prop.new_id, f"{topic_id}_{today.replace('-', '')}")
