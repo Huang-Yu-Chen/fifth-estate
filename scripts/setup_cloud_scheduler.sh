@@ -22,16 +22,17 @@ echo
 
 upsert() {
   local name="$1" workflow="$2" schedule="$3"
-  local verb=create
+  local verb=create headers_flag=--headers
   if gcloud scheduler jobs describe "$name" --project "$PROJECT" --location "$REGION" >/dev/null 2>&1; then
     verb=update
+    headers_flag=--update-headers
   fi
   gcloud scheduler jobs "$verb" http "$name" \
     --project "$PROJECT" --location "$REGION" \
     --schedule "$schedule" --time-zone "Asia/Taipei" \
     --uri "https://api.github.com/repos/$REPO/actions/workflows/$workflow/dispatches" \
     --http-method POST \
-    --update-headers "Authorization=Bearer $TOKEN,Accept=application/vnd.github+json,User-Agent=fifth-estate-scheduler,Content-Type=application/json" \
+    "$headers_flag" "Authorization=Bearer $TOKEN,Accept=application/vnd.github+json,User-Agent=fifth-estate-scheduler,Content-Type=application/json" \
     --message-body '{"ref":"main"}' \
     --attempt-deadline 30s \
     --max-retry-attempts 3 \
