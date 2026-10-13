@@ -23,6 +23,8 @@ jobs:
     timeout-minutes: 40
     permissions:
       contents: write   # public-data snapshot commit
+      actions: write    # dispatch the weekly report
+      issues: read
     env:
       TZ: Asia/Taipei
       FIFTH_DATA_DIR: ${{ github.workspace }}/data
@@ -98,6 +100,18 @@ jobs:
             sleep $((i * 10))
           done
           exit 1
+      - name: Weekly report due?
+        # GitHub's cron is unreliable here, so the (Cloud Scheduler–triggered) publish run starts the
+        # weekly report on Monday from 09:00 Taipei if this week's issue doesn't exist yet.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(date +%u)" = "1" ] && [ "$(date +%H)" -ge 9 ]; then
+            title="第五權週報 $(date +%G-W%V)"
+            if ! gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "\"$title\" in:title" --json title --jq '.[].title' | grep -qxF "$title"; then
+              gh workflow run weekly.yml --repo "$GITHUB_REPOSITORY"
+            fi
+          fi
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22

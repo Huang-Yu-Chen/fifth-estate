@@ -1,6 +1,6 @@
 name: weekly
 # Mondays 09:00 Taipei: scraper health, LLM spend, subtopic changes, and the MBD-style weekly
-# validation sample, posted as an Issue for review.
+# validation sample, posted as an Issue for review. Normally started by publish.yml (cron is a backup).
 on:
   schedule:
     - cron: "0 1 * * 1"
@@ -58,4 +58,10 @@ jobs:
       - name: Open issue
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue create --repo "$GITHUB_REPOSITORY" --title "第五權週報 $(date +%G-W%V)" --body-file report.md
+        run: |
+          title="第五權週報 $(date +%G-W%V)"
+          if gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "\"$title\" in:title" --json title --jq '.[].title' | grep -qxF "$title"; then
+            echo "already posted: $title"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file report.md
+          fi
