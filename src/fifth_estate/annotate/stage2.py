@@ -29,8 +29,11 @@ def setup(cfg: llm.TaskConfig | None = None) -> tuple[llm.TaskConfig, str, str]:
     return cfg, system, phash
 
 
-def select_pending(limit: int, days: int = 7, exclude: set[str] | None = None) -> list[dict]:
+def select_pending(limit: int, days: int = 7, exclude: set[str] | None = None, phash: str | None = None) -> list[dict]:
+    """In-scope articles without a successful label from the current prompt version. Never-labeled
+    articles come first; articles labeled with an older codebook are re-labeled after them."""
     scopes = ", ".join(f"'{s}'" for s in IN_SCOPE)
+    phash = phash or setup()[2]
     rows = lake.rows(
         f"""
         WITH s1 AS (SELECT * FROM {lake.latest('stage1', days=days + 1, where="status = 'ok'")}),
@@ -39,14 +42,18 @@ def select_pending(limit: int, days: int = 7, exclude: set[str] | None = None) -
             QUALIFY row_number() OVER (PARTITION BY article_id ORDER BY created_at) = 1
         ),
         s2 AS (
-            SELECT article_id, bool_or(status = 'ok') AS ok, count(*) AS n
+            SELECT article_id,
+                   bool_or(status = 'ok' AND prompt_hash = ?) AS ok_current,
+                   bool_or(status = 'ok') AS ok_any,
+                   count(*) FILTER (WHERE prompt_hash = ?) AS n_current
             FROM {lake.source('stage2', days + 1)} GROUP BY article_id
         )
         SELECT a.article_id, a.outlet_id, a.title, a.body, a.published_at
         FROM s1 JOIN a USING (article_id) LEFT JOIN s2 USING (article_id)
-        WHERE s1.scope IN ({scopes}) AND NOT coalesce(s2.ok, false) AND coalesce(s2.n, 0) < {MAX_ATTEMPTS}
-        ORDER BY a.published_at DESC NULLS LAST
-        """
+        WHERE s1.scope IN ({scopes}) AND NOT coalesce(s2.ok_current, false) AND coalesce(s2.n_current, 0) < {MAX_ATTEMPTS}
+        ORDER BY coalesce(s2.ok_any, false), a.published_at DESC NULLS LAST
+        """,
+        [phash, phash],
     )
     exclude = exclude or set()
     return [r for r in rows if f"{TASK}:{r['article_id']}" not in exclude][:limit]
@@ -113,7 +120,7 @@ def collect(run_id: str) -> dict:
 def submit(limit: int, run_id: str) -> dict:
     cfg, system, phash = setup()
     pend = batch.pending_ids(TASK)
-    articles = select_pending(limit, exclude=pend)
+    articles = select_pending(limit, exclude=pend, phash=phash)
     if not articles:
         return {"submitted": 0, "pending_batches": len(batch.pending(TASK))}
     texts = [article_text(a) for a in articles]
@@ -153,7 +160,7 @@ async def _run_sync(articles: list[dict], cfg: llm.TaskConfig, system: str, phas
 def run_sync(limit: int, run_id: str | None = None, cfg: llm.TaskConfig | None = None, write: bool = True) -> tuple[dict, list[dict]]:
     run_id = run_id or lake.new_run_id()
     cfg, system, phash = setup(cfg)
-    articles = select_pending(limit, exclude=batch.pending_ids(TASK))
+    articles = select_pending(limit, exclude=batch.pending_ids(TASK), phash=phash)
     if not articles:
         return {"processed": 0}, []
     if llm.spent_today() >= llm.daily_budget():

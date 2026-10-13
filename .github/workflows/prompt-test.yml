@@ -1,0 +1,61 @@
+name: prompt-test
+# Manual: re-run Stage 2 with the current codebook on a few already-labeled articles and show old vs
+# new scores in the job summary. Writes nothing to the data repo. Logs are public: titles and model
+# reasons only, never article text.
+on:
+  workflow_dispatch:
+    inputs:
+      outlets:
+        description: Comma-separated outlet ids (empty = all)
+        default: ""
+      china_only:
+        description: Only China-related articles
+        type: boolean
+        default: false
+      n:
+        description: Number of articles
+        default: "8"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Taipei
+      FIFTH_DATA_DIR: ${{ github.workspace }}/data
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Data partitions to check out
+        id: paths
+        run: |
+          {
+            echo 'patterns<<EOF'
+            echo '/registry/'
+            for i in $(seq -1 8); do
+              d=$(date -d "-$i day" +%F)
+              for t in articles stage1 stage2; do echo "/$t/date=$d/"; done
+            done
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: Huang-Yu-Chen/fifth-estate-data
+          ssh-key: ${{ secrets.DATA_REPO_DEPLOY_KEY }}
+          path: data
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: ${{ steps.paths.outputs.patterns }}
+          sparse-checkout-cone-mode: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Try the current codebook
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: >-
+          uv run fifth try-prompt --n "${{ inputs.n }}"
+          ${{ inputs.outlets != '' && format('--outlets {0}', inputs.outlets) || '' }}
+          ${{ inputs.china_only && '--china-only' || '' }}
+          --summary "$GITHUB_STEP_SUMMARY"

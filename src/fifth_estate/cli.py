@@ -231,6 +231,46 @@ def weekly_report(out: str = typer.Option(..., help="Markdown file to write")) -
     console.print(f"weekly report → {out}")
 
 
+@app.command("try-prompt")
+def try_prompt(
+    outlets: str = typer.Option(None, help="Comma-separated outlet ids"),
+    china_only: bool = typer.Option(False, help="Only articles the current labels mark as China-related"),
+    n: int = typer.Option(8),
+    summary: str = typer.Option(None),
+) -> None:
+    """Re-run Stage 2 (current codebook, sync) on a few already-labeled articles and print old vs new
+    scores and reasons. Writes nothing to the lake. Prints titles and reasons only, never article text."""
+    import asyncio
+
+    from .annotate import stage2 as s2
+    from .store import lake
+
+    cfg, system, phash = s2.setup()
+    ids = _ids(outlets)
+    where = "status = 'ok'"
+    old = lake.rows(
+        f"""SELECT s.*, a.outlet_id, a.title, a.body FROM {lake.latest('stage2', days=8, where=where)} s
+            JOIN (SELECT * FROM {lake.source('articles', 8)} QUALIFY row_number() OVER (PARTITION BY article_id ORDER BY created_at)=1) a
+            USING (article_id) ORDER BY a.published_at DESC"""
+    )
+    old = [r for r in old if (not ids or r["outlet_id"] in ids) and (not china_only or r["china_relevance"])][:n]
+    rows, _ = asyncio.run(s2._run_sync(old, cfg, system, phash, lake.new_run_id(), concurrency=8))
+    new = {r["article_id"]: r for r in rows}
+    lines = [f"### try-prompt (stage2 prompt {phash}, {cfg.model} {cfg.reasoning_effort})", ""]
+    for r in old:
+        m = new.get(r["article_id"], {})
+        lines.append(f"- **[{r['outlet_id']}] {r['title']}**")
+        lines.append(f"  - lean {r['lean']} → {m.get('lean')} ｜ china {r['china_stance']} → {m.get('china_stance')} ｜ tone {r['tone']} → {m.get('tone')}")
+        lines.append(f"  - lean: {m.get('lean_reason')}")
+        if m.get("china_reason") and m.get("china_relevance"):
+            lines.append(f"  - china: {m.get('china_reason')}")
+    text = "\n".join(lines) + "\n"
+    console.print(text)
+    if summary:
+        with open(summary, "a", encoding="utf-8") as f:
+            f.write(text)
+
+
 @app.command()
 def stats(days: int = typer.Option(3)) -> None:
     """Article counts per outlet and day."""
