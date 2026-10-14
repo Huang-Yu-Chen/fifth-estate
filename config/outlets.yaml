@@ -13,7 +13,7 @@
 #   listing      版面列表頁（伺服器端渲染），以 link_pattern 抓文章連結
 #   yahoo_provider Yahoo 奇摩新聞的供稿者封存頁（用於被 Cloudflare 擋的媒體）
 
-user_agent: "FifthEstateBot/0.1 (+https://github.com/Huang-Yu-Chen/fifth-estate)"
+user_agent: "FifthEstateBot/0.1 (+https://the-fifth-estate.org/methodology)"
 per_domain_interval_sec: 1.0
 request_timeout_sec: 20
 max_fetch_attempts: 3

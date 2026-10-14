@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useParams } from "react-router-dom";
-import { useData, useMeta } from "../data";
+import { useData, useMeta, usePageTitle } from "../data";
 import type { OutletDoc } from "../types";
 import { signed, topicName } from "../format";
 import { useTheme } from "../palette";
@@ -14,6 +14,7 @@ export default function OutletPage() {
   const theme = useTheme();
   const meta = useMeta();
   const doc = useData<OutletDoc>(`outlets/${id}.json`);
+  usePageTitle(doc.data?.name);
 
   const trend = useMemo<EChartsOption | null>(() => {
     if (!doc.data) return null;

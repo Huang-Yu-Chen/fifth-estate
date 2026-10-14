@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useData, useMeta, useWindowKey } from "../data";
+import { useData, useMeta, usePageTitle, useWindowKey } from "../data";
 import type { Axis, UnitDoc, UnitKind } from "../types";
 import { AXIS_LABEL, KIND_LABEL, num, shortDate, skewSentence, topicName } from "../format";
 import { useTheme } from "../palette";
@@ -19,6 +19,7 @@ export default function Unit() {
   const [axis, setAxis] = useState<Axis>("lean");
   const meta = useMeta();
   const doc = useData<UnitDoc>(`units/${kind}/${encodeURIComponent(id)}.json`);
+  usePageTitle(doc.data?.name);
   if (meta.error) return <ErrorState error={meta.error} />;
   if (doc.error) return <Empty>找不到這個{KIND_LABEL[kind as UnitKind] ?? "項目"}，可能已經整併或超出資料期間。</Empty>;
   if (!meta.data || !doc.data) return <Loading />;

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { useData, useMeta, useWindowKey } from "../data";
+import { useData, useMeta, usePageTitle, useWindowKey } from "../data";
+import { PAGES } from "../site";
 import type { IndexEntry } from "../types";
 import { num, outletName, shortDate, topicName } from "../format";
 import { Empty, ErrorState, Loading } from "../components/States";
@@ -8,6 +9,7 @@ export default function Events() {
   const [w] = useWindowKey();
   const meta = useMeta();
   const events = useData<IndexEntry[]>("events.json");
+  usePageTitle(PAGES.events.title);
   if (meta.error || events.error) return <ErrorState error={(meta.error ?? events.error)!} />;
   if (!meta.data || !events.data) return <Loading />;
 

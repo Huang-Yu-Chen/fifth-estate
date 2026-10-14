@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { pageTitle } from "./site";
 import type { Meta, WindowKey } from "./types";
 
 const cache = new Map<string, Promise<unknown>>();
@@ -44,6 +45,13 @@ export function useData<T>(path: string | null): Loaded<T> {
 
 export function useMeta(): Loaded<Meta> {
   return useData<Meta>("meta.json");
+}
+
+/** Browser tab title (see pageTitle); null for the overview, undefined while the name is still loading. */
+export function usePageTitle(name: string | null | undefined) {
+  useEffect(() => {
+    if (name !== undefined) document.title = pageTitle(name);
+  }, [name]);
 }
 
 const WINDOW_KEY = "fifth-estate-window";

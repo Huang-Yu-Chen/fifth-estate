@@ -2,7 +2,8 @@
 
 Taiwanese political-news polarization tracker modeled on UPenn's Media Bias Detector (MBD).
 Code: this public repo. Data (full text + labels): private repo `Huang-Yu-Chen/fifth-estate-data`
-(checked out next to this repo as `../fifth-estate-data`, or set `FIFTH_DATA_DIR`). Site: GitHub Pages.
+(checked out next to this repo as `../fifth-estate-data`, or set `FIFTH_DATA_DIR`). Site: https://the-fifth-estate.org
+(GitHub Pages with a custom domain set in the repo's Pages settings, no CNAME file; DNS at GoDaddy, www → apex).
 
 Scheduling: Google Cloud Scheduler jobs `fifth-estate-ingest` (hourly :07) and `fifth-estate-publish`
 (every 3 h :27) in project `project-ec3ab1fc-4d15-40e8-a92`, region asia-east1, call workflow_dispatch with a
@@ -21,6 +22,9 @@ fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`)
   `config/subtopics_seed.yaml` seeds the living registry (`registry/subtopics.yaml` in the data repo).
 - `prompts/*.md` codebooks. Changing a prompt changes its hash (recorded per label); bump `CLEAN_VERSION`
   in `ingest/clean.py` when cleaning rules change.
+- `web/`: clean URLs (BrowserRouter) served from the domain root. GitHub Pages has no rewrites, so the build writes
+  one HTML file per route with its own title/description/canonical (`/events` → `events.html`), plus `404.html`
+  and `robots.txt` (`web/vite.config.ts`; page copy in `web/src/site.ts`). Old `#/…` links are converted in `main.tsx`.
 - Lake: append-only zstd Parquet `{table}/date=YYYY-MM-DD/*.parquet`, DuckDB queries; superseded rows are
   resolved with `lake.latest()` (newest `created_at` per key). Schemas in `store/schemas.py`.
 
@@ -32,5 +36,5 @@ fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`)
 - Models: Stage 1 & Stage 2 `gpt-6-luna`, embeddings `text-embedding-3-large` (1024 d), synthesis
   `gpt-6.1-sol`. Week-2 bake-off (Luna vs 6.1-Sol vs Astra on a ~150-article human gold set) decides Stage 2.
 - Polarization P = mean over axes of 100·(1/K²)ΣΣ|x̃o−x̃p| (equal outlet weights, EB shrinkage κ=5).
-- Site stays `status: beta` (+ `noindex` in `web/index.html`) until the gold-set validation is done.
+- Site stays `status: beta` (+ `noindex`, which the build adds while beta) until the gold-set validation is done.
 - Never publish full article text; site shows titles, links, scores, short model reasons.

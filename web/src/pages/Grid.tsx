@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useData, useMeta, useWindowKey } from "../data";
+import { useData, useMeta, usePageTitle, useWindowKey } from "../data";
+import { PAGES } from "../site";
 import type { GridDoc } from "../types";
 import { signed } from "../format";
 import { useTheme } from "../palette";
@@ -22,6 +23,7 @@ export default function Grid() {
   const [metric, setMetric] = useState<Metric>("n");
   const meta = useMeta();
   const grid = useData<GridDoc>("grid.json");
+  usePageTitle(PAGES.grid.title);
 
   const option = useMemo<EChartsOption | null>(() => {
     if (!meta.data || !grid.data) return null;

@@ -1,8 +1,10 @@
-import { useMeta } from "../data";
+import { useMeta, usePageTitle } from "../data";
+import { PAGES } from "../site";
 import { ErrorState, Loading } from "../components/States";
 
 export default function Methodology() {
   const meta = useMeta();
+  usePageTitle(PAGES.methodology.title);
   if (meta.error) return <ErrorState error={meta.error} />;
   if (!meta.data) return <Loading />;
   const m = meta.data;

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useData, useMeta, useWindowKey } from "../data";
+import { useData, useMeta, usePageTitle, useWindowKey } from "../data";
+import { PAGES } from "../site";
 import type { Axis, IndexDoc, UnitDoc, UnitKind } from "../types";
 import { AXIS_LABEL, num } from "../format";
 import { useTheme } from "../palette";
@@ -16,6 +17,7 @@ export default function Coverage() {
   const meta = useMeta();
   const index = useData<IndexDoc>("index.json");
   const doc = useData<UnitDoc>(`units/${unit}.json`);
+  usePageTitle(PAGES.coverage.title);
   if (meta.error || index.error) return <ErrorState error={(meta.error ?? index.error)!} />;
   if (!meta.data || !index.data) return <Loading />;
   const m = meta.data;

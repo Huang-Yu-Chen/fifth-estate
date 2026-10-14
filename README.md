@@ -5,12 +5,14 @@
 - 每個議題 × 每家媒體：**報導數**、**親綠 ↔ 親藍**、**抗中 ↔ 友中**
 - 每個議題：單一的 **極化指數**（0–100）
 
+網站：<https://the-fifth-estate.org>
+
 ## 運作方式
 
 ```
 GitHub Actions（本 repo）
  ├ ingest.yml   每小時   發現新文章 → 抓取 → 抽取清理 → Stage 1 分類 → Stage 2 立場評分 → 嵌入
- ├ publish.yml  每 3 小時 事件分群 → 子議題整併 → 指標與極化指數 → 儀表板（GitHub Pages）
+ ├ publish.yml  每 3 小時 事件分群 → 子議題整併 → 指標與極化指數 → 儀表板（GitHub Pages，自訂網域）
  └ weekly.yml   每週     驗證抽樣、子議題審核、資料健康報告
 私有 repo fifth-estate-data：新聞全文與標註（Parquet，DuckDB 查詢）
 ```

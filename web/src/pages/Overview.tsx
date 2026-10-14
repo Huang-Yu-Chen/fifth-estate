@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { useData, useMeta, useWindowKey } from "../data";
+import { useData, useMeta, usePageTitle, useWindowKey } from "../data";
 import type { IndexDoc } from "../types";
 import { num, shortDate, shortTime } from "../format";
 import { useTheme } from "../palette";
@@ -13,6 +13,7 @@ export default function Overview() {
   const nav = useNavigate();
   const meta = useMeta();
   const index = useData<IndexDoc>("index.json");
+  usePageTitle(null);
   if (meta.error || index.error) return <ErrorState error={(meta.error ?? index.error)!} />;
   if (!meta.data || !index.data) return <Loading />;
   const m = meta.data;

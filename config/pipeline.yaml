@@ -26,5 +26,6 @@ wire:
   minhash_threshold: 0.8       # 與中央社稿相似度 ≥ 此值視為轉載
 
 site:
-  # beta：AI 標註尚未與人工金標準比對；網站每頁顯示提醒（web/index.html 也有 noindex，驗證完成後一併移除）
+  # beta：AI 標註尚未與人工金標準比對；網站每頁顯示提醒，建置時每頁加 noindex、不產生 sitemap（web/vite.config.ts）。
+  # 驗證完成後改成 stable：提醒與 noindex 一起拿掉，並開始產生 sitemap.xml。
   status: beta
