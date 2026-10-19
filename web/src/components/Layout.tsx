@@ -1,11 +1,11 @@
 import { Suspense, useEffect } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { useMeta, useWindowKey } from "../data";
+import { countPageView, useMeta, useWindowKey } from "../data";
 import { shortTime } from "../format";
 import type { WindowKey } from "../types";
 import { Loading } from "./States";
 
-// The site is rebuilt every 3 hours; data this much older means updates have stopped (e.g. paused while
+// The data is updated every 3 hours; data this much older means updates have stopped (e.g. paused while
 // the OpenAI quota is used up), and the "last 7 days" are no longer the last 7 days.
 const STALE_HOURS = 12;
 
@@ -40,6 +40,7 @@ export default function Layout() {
   const { search, pathname } = useLocation();
   useEffect(() => {
     window.scrollTo(0, 0);
+    countPageView(pathname);
   }, [pathname]);
   const keep = new URLSearchParams(search).get("w");
   const q = keep ? `?w=${keep}` : "";

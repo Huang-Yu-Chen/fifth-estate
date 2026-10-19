@@ -1,0 +1,7 @@
+# The API image (Dockerfile) needs only these
+*
+!pyproject.toml
+!uv.lock
+!src/fifth_estate/__init__.py
+!src/fifth_estate/api
+src/fifth_estate/api/__pycache__

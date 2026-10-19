@@ -15,8 +15,8 @@ export default function Coverage() {
   const [unit, setUnit] = useState("all/all");
   const [axis, setAxis] = useState<Axis>("lean");
   const meta = useMeta();
-  const index = useData<IndexDoc>("index.json");
-  const doc = useData<UnitDoc>(`units/${unit}.json`);
+  const index = useData<IndexDoc>("index");
+  const doc = useData<UnitDoc>(`units/${unit}`);
   usePageTitle(PAGES.coverage.title);
   if (meta.error || index.error) return <ErrorState error={(meta.error ?? index.error)!} />;
   if (!meta.data || !index.data) return <Loading />;

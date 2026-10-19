@@ -1,0 +1,13 @@
+# `gcloud builds submit` (scripts/setup_backend.sh) uploads only what the API image needs.
+/*
+!/Dockerfile
+!/.dockerignore
+!/pyproject.toml
+!/uv.lock
+!/src
+/src/*
+!/src/fifth_estate
+/src/fifth_estate/*
+!/src/fifth_estate/__init__.py
+!/src/fifth_estate/api
+__pycache__/

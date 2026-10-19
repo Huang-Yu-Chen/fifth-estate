@@ -1,0 +1,46 @@
+name: api
+# The public API (src/fifth_estate/api) on Cloud Run: tested, built and deployed when its code changes.
+# Signs in to Google Cloud without a stored key (Workload Identity Federation, scripts/setup_backend.sh) as
+# fifth-estate-deployer, which can only push images and update this one service. Settings such as the
+# bucket, the visitor-hash secret and the instance limits stay as the setup script set them.
+on:
+  push:
+    branches: [main]
+    paths: ["src/fifth_estate/api/**", "Dockerfile", ".dockerignore", "uv.lock", ".github/workflows/api.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: api
+  cancel-in-progress: false
+env:
+  IMAGE: asia-east1-docker.pkg.dev/project-ec3ab1fc-4d15-40e8-a92/fifth-estate/api
+  URL: https://fifth-estate-api-461716033038.asia-east1.run.app
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run pytest -q tests/test_api.py
+      - uses: google-github-actions/auth@v3.0.0
+        with:
+          workload_identity_provider: projects/461716033038/locations/global/workloadIdentityPools/github/providers/fifth-estate-repo
+          service_account: fifth-estate-deployer@project-ec3ab1fc-4d15-40e8-a92.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3.0.1
+      - name: Build and push the image
+        run: |
+          gcloud auth configure-docker asia-east1-docker.pkg.dev --quiet
+          docker build -t "$IMAGE:${GITHUB_SHA::12}" .
+          docker push "$IMAGE:${GITHUB_SHA::12}"
+      - name: Deploy
+        run: >-
+          gcloud run deploy fifth-estate-api --project project-ec3ab1fc-4d15-40e8-a92 --region asia-east1
+          --image "$IMAGE:${GITHUB_SHA::12}" --quiet
+      - name: Smoke test
+        run: curl -fsS --retry 3 "$URL/v1/health"

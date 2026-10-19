@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { loadArticles } from "../data";
 import type { Article, Axis, Meta } from "../types";
-import { outletName, shortTime, signed } from "../format";
+import { num, outletName, shortTime, signed } from "../format";
 import { scoreColor, type Theme } from "../palette";
+import { Empty, ErrorState, Loading } from "./States";
 
 function Chip({ axis, label, value, theme }: { axis: Axis; label: string; value: number | null; theme: Theme }) {
   if (value == null) return null;
@@ -13,27 +15,96 @@ function Chip({ axis, label, value, theme }: { axis: Axis; label: string; value:
   );
 }
 
-export default function ArticleList({ articles, meta, theme, pageSize = 40 }: { articles: Article[]; meta: Meta; theme: Theme; pageSize?: number }) {
-  const [outlet, setOutlet] = useState("");
+/**
+ * A unit's articles (unit="topic/recall"), or one outlet's (outlet="cna"), newest first, loaded from the API
+ * a page at a time. Give it a `key` per unit so the outlet filter starts over on a new unit.
+ */
+export default function ArticleList({
+  meta,
+  theme,
+  unit = "all/all",
+  outlet: only,
+  pageSize = 40,
+}: {
+  meta: Meta;
+  theme: Theme;
+  unit?: string;
+  outlet?: string;
+  pageSize?: number;
+}) {
+  const [picked, setPicked] = useState("");
+  const outlet = only ?? picked;
   const [open, setOpen] = useState<string | null>(null);
-  const [shown, setShown] = useState(pageSize);
-  const outlets = useMemo(() => meta.outlets.filter((o) => articles.some((a) => a.outlet === o.id)), [meta, articles]);
-  const rows = outlet ? articles.filter((a) => a.outlet === outlet) : articles;
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [next, setNext] = useState<string | null>(null);
+  const [counts, setCounts] = useState<{ total: number; outlets: Record<string, number> } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const query = useRef("");
+
+  useEffect(() => {
+    const q = (query.current = `${unit}|${outlet}`);
+    setLoading(true);
+    setError(null);
+    setArticles([]);
+    setNext(null);
+    loadArticles({ unit, outlet, limit: pageSize }).then(
+      (p) => {
+        if (query.current !== q) return;
+        setArticles(p.articles);
+        setNext(p.next);
+        if (p.total != null) setCounts({ total: p.total, outlets: p.outlets ?? {} });
+        setLoading(false);
+      },
+      (e: Error) => {
+        if (query.current !== q) return;
+        setError(e);
+        setLoading(false);
+      },
+    );
+  }, [unit, outlet, pageSize]);
+
+  const more = () => {
+    const q = query.current;
+    setLoading(true);
+    loadArticles({ unit, outlet, limit: pageSize, cursor: next }).then(
+      (p) => {
+        if (query.current !== q) return;
+        setArticles((a) => [...a, ...p.articles]);
+        setNext(p.next);
+        setLoading(false);
+      },
+      (e: Error) => {
+        if (query.current !== q) return;
+        setError(e);
+        setLoading(false);
+      },
+    );
+  };
+
+  const total = counts && (outlet ? (counts.outlets[outlet] ?? 0) : counts.total);
+  const left = total != null ? total - articles.length : null;
 
   return (
     <>
-      <div className="controls">
-        <select value={outlet} onChange={(e) => { setOutlet(e.target.value); setShown(pageSize); }} aria-label="篩選媒體">
-          <option value="">全部媒體（{articles.length}）</option>
-          {outlets.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.short}（{articles.filter((a) => a.outlet === o.id).length}）
-            </option>
-          ))}
-        </select>
-      </div>
+      {!only && counts && counts.total > 0 && (
+        <div className="controls">
+          <select value={picked} onChange={(e) => setPicked(e.target.value)} aria-label="篩選媒體">
+            <option value="">全部媒體（{num(counts.total)}）</option>
+            {meta.outlets
+              .filter((o) => counts.outlets[o.id])
+              .map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.short}（{num(counts.outlets[o.id])}）
+                </option>
+              ))}
+          </select>
+        </div>
+      )}
+      {error && <ErrorState error={error} />}
+      {!error && !loading && articles.length === 0 && <Empty>沒有報導。</Empty>}
       <ul className="articles">
-        {rows.slice(0, shown).map((a) => (
+        {articles.map((a) => (
           <li key={a.id}>
             <div className="title">
               <a href={a.url} target="_blank" rel="noopener noreferrer">
@@ -81,9 +152,10 @@ export default function ArticleList({ articles, meta, theme, pageSize = 40 }: { 
           </li>
         ))}
       </ul>
-      {rows.length > shown && (
-        <button type="button" className="linkbtn" onClick={() => setShown(shown + pageSize)}>
-          顯示更多（還有 {rows.length - shown} 篇）
+      {loading && <Loading />}
+      {!loading && !error && next && (
+        <button type="button" className="linkbtn" onClick={more}>
+          顯示更多{left != null && left > 0 ? `（還有 ${num(left)} 篇）` : ""}
         </button>
       )}
     </>

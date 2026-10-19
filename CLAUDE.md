@@ -3,7 +3,9 @@
 Taiwanese political-news polarization tracker modeled on UPenn's Media Bias Detector (MBD).
 Code: this public repo. Data (full text + labels): private repo `Huang-Yu-Chen/fifth-estate-data`
 (checked out next to this repo as `../fifth-estate-data`, or set `FIFTH_DATA_DIR`). Site: https://the-fifth-estate.org
-(GitHub Pages with a custom domain set in the repo's Pages settings, no CNAME file; DNS at GoDaddy, www → apex).
+(GitHub Pages with a custom domain set in the repo's Pages settings, no CNAME file; DNS at GoDaddy, www → apex):
+a static dashboard deployed only when `web/` changes (`site.yml`) that reads the public API `fifth-estate-api`
+(Cloud Run, asia-east1, `src/fifth_estate/api`, deployed by `api.yml`); data updates never redeploy anything.
 
 Scheduling: Google Cloud Scheduler jobs `fifth-estate-ingest` (hourly :07) and `fifth-estate-publish`
 (every 3 h :27) in project `project-ec3ab1fc-4d15-40e8-a92`, region asia-east1, call workflow_dispatch with a
@@ -13,8 +15,10 @@ fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`)
 - `uv run fifth ingest|annotate|stage1|stage2|embed|publish|stats|status` — pipeline steps (see `src/fifth_estate/cli.py`)
 - `uv run fifth gold-sample | label --coder X | eval --coder X --models a:low,b:low` — validation
 - `uv run pytest` — tests; `cd web && npm run build` — dashboard (Vite + React + ECharts, zh-TW)
+- `uv run fifth export` (snapshot from the lake as is) + `uv run fifth serve` (API on :8000) + `cd web && npm run dev`
+  (proxies `/v1` to it) — the site locally on real or fake data
 - Dev without an API key: `FIFTH_DATA_DIR=../fifth-estate-data-local uv run python scripts/dev_fake_annotations.py`
-  then `uv run fifth publish --skip-llm` (writes `web/public/data`, marked fake; never deploy it)
+  then `uv run fifth publish --skip-llm` (writes `build/serving/serving.sqlite`, marked fake; never upload it)
 
 ## Layout
 - `config/outlets.yaml` sources and section rules per outlet; `config/models.yaml` model per task (user-chosen,
@@ -32,6 +36,13 @@ fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`)
   embedding, publish updates wire flags but not the site. When the quota is back the backlog is labeled
   newest first with the look-back reaching the outage start, and the site resumes once nothing is left.
   A quota failure is never recorded as an attempt. `fifth status` shows the state; `publish --force` overrides.
+- Serving: publish writes one read-only SQLite snapshot (`export/serving.py`; layout in `api/schema.py`: gzipped
+  JSON docs + one row per article) and uploads `serving.sqlite.gz` over the versioned object
+  `gs://project-ec3ab1fc-4d15-40e8-a92-serving/serving.sqlite.gz`; every API instance switches to the new
+  generation within a minute (`api/snapshots.py`). Roll back by copying an older generation over it
+  (`gcloud storage ls -a gs://…/serving.sqlite.gz`, then `gcloud storage cp gs://…/serving.sqlite.gz#GEN gs://…/serving.sqlite.gz`).
+  GitHub Actions sign in by Workload Identity Federation (no keys); all of it is in `scripts/setup_backend.sh`.
+  Anonymous page views: the site beacons `POST /v1/hit`, logged as one JSON line per view (`api/hits.py`).
 
 ## Decisions (from the user, 2026-10-13)
 - Crawl politics/兩岸/國際 sections only (no homepage scraping); 中時/民視 via Yahoo provider archives

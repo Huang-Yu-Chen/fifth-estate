@@ -6,6 +6,18 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "web", "run", "dev", "--", "--port", "5173", "--strictPort"],
       "port": 5173
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "fifth", "serve", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "web-production",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "web", "run", "preview", "--", "--port", "4173", "--strictPort"],
+      "port": 4173
     }
   ]
 }

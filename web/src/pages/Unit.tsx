@@ -18,7 +18,7 @@ export default function Unit() {
   const [noOpinion, setNoOpinion] = useState(false);
   const [axis, setAxis] = useState<Axis>("lean");
   const meta = useMeta();
-  const doc = useData<UnitDoc>(`units/${kind}/${encodeURIComponent(id)}.json`);
+  const doc = useData<UnitDoc>(`units/${kind}/${encodeURIComponent(id)}`);
   usePageTitle(doc.data?.name);
   if (meta.error) return <ErrorState error={meta.error} />;
   if (doc.error) return <Empty>找不到這個{KIND_LABEL[kind as UnitKind] ?? "項目"}，可能已經整併或超出資料期間。</Empty>;
@@ -137,8 +137,8 @@ export default function Unit() {
 
       <section className="card">
         <h2>報導</h2>
-        <div className="sub">最新的 {d.articles.length} 篇。標題連到原始報導；分數與理由由 AI 標註。</div>
-        {d.articles.length ? <ArticleList articles={d.articles} meta={m} theme={theme} /> : <Empty>沒有報導。</Empty>}
+        <div className="sub">由新到舊。標題連到原始報導；分數與理由由 AI 標註。</div>
+        <ArticleList key={`${kind}/${id}`} unit={`${kind}/${id}`} meta={m} theme={theme} />
       </section>
     </div>
   );

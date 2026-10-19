@@ -12,7 +12,7 @@ export default function Overview() {
   const theme = useTheme();
   const nav = useNavigate();
   const meta = useMeta();
-  const index = useData<IndexDoc>("index.json");
+  const index = useData<IndexDoc>("index");
   usePageTitle(null);
   if (meta.error || index.error) return <ErrorState error={(meta.error ?? index.error)!} />;
   if (!meta.data || !index.data) return <Loading />;

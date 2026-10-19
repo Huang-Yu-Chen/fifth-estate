@@ -1,20 +1,52 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { pageTitle } from "./site";
-import type { Meta, WindowKey } from "./types";
+import type { ArticlePage, Meta, WindowKey } from "./types";
 
-const cache = new Map<string, Promise<unknown>>();
+// Data comes from the API (src/fifth_estate/api), not from files in this build. Production builds take its
+// address from VITE_API_BASE (.env.production); in development it is empty and Vite proxies /v1 to
+// `uv run fifth serve` (vite.config.ts).
+export const API = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
+// Ask again after this long: the data changes every few hours, and the browser revalidates cheaply (ETag).
+const TTL_MS = 5 * 60_000;
+
+const cache = new Map<string, { at: number; p: Promise<unknown> }>();
 
 export function load<T>(path: string): Promise<T> {
-  if (!cache.has(path)) {
-    const p = fetch(`${import.meta.env.BASE_URL}data/${path}`).then((r) => {
-      if (!r.ok) throw new Error(`${r.status} ${path}`);
-      return r.json();
-    });
-    p.catch(() => cache.delete(path));
-    cache.set(path, p);
+  const hit = cache.get(path);
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.p as Promise<T>;
+  const p = fetch(`${API}/v1/${path}`).then((r) => {
+    if (!r.ok) throw new Error(`${r.status} ${path}`);
+    return r.json();
+  });
+  p.catch(() => {
+    if (cache.get(path)?.p === p) cache.delete(path);
+  });
+  cache.set(path, { at: Date.now(), p });
+  return p as Promise<T>;
+}
+
+/** One page of a unit's (or an outlet's) articles, newest first. */
+export function loadArticles(q: { unit?: string; outlet?: string; limit: number; cursor?: string | null }): Promise<ArticlePage> {
+  const params = new URLSearchParams({ unit: q.unit ?? "all/all", limit: String(q.limit) });
+  if (q.outlet) params.set("outlet", q.outlet);
+  if (q.cursor) params.set("cursor", q.cursor);
+  return load<ArticlePage>(`articles?${params}`);
+}
+
+let referrer = document.referrer; // only the first page of a visit has one
+
+/** Anonymous page-view count (no cookies; see src/fifth_estate/api/hits.py). Never gets in the way. */
+export function countPageView(route: string): void {
+  const body = JSON.stringify({ route, referrer });
+  referrer = "";
+  try {
+    if (!navigator.sendBeacon?.(`${API}/v1/hit`, body)) {
+      fetch(`${API}/v1/hit`, { method: "POST", body, keepalive: true, mode: "no-cors" }).catch(() => {});
+    }
+  } catch {
+    /* counting must never break the page */
   }
-  return cache.get(path) as Promise<T>;
 }
 
 export interface Loaded<T> {
@@ -44,7 +76,7 @@ export function useData<T>(path: string | null): Loaded<T> {
 }
 
 export function useMeta(): Loaded<Meta> {
-  return useData<Meta>("meta.json");
+  return useData<Meta>("meta");
 }
 
 /** Browser tab title (see pageTitle); null for the overview, undefined while the name is still loading. */

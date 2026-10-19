@@ -1,9 +1,10 @@
 name: publish
-# Every 3 hours: wire flags → events → metrics/polarization → dashboard JSON → GitHub Pages.
+# Every 3 hours: wire flags → events → metrics/polarization → serving snapshot → Cloud Storage, where the API
+# (Cloud Run fifth-estate-api, src/fifth_estate/api) picks it up within a minute. The website is not redeployed.
 # The first run after 20:00 (Taipei) each day also does subtopic discovery and commits a small public
 # snapshot to public-data/ (scheduled runs can be dropped, so this is not tied to one exact run).
 # While annotation is paused (OpenAI quota used up) or still labeling the backlog afterwards, only the
-# wire flags are updated and the website is left as it is (src/fifth_estate/annotate/pause.py).
+# wire flags are updated and no snapshot is uploaded, so the website stays as it is (annotate/pause.py).
 # Primary trigger: Google Cloud Scheduler (job fifth-estate-publish, :27 every 3 hours); cron is a backup.
 on:
   schedule:
@@ -27,12 +28,11 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    outputs:
-      site: ${{ steps.publish.outputs.site }}
     permissions:
       contents: write   # public-data snapshot commit
       actions: write    # dispatch the weekly report
       issues: read
+      id-token: write   # upload the snapshot to Google Cloud without a stored key (scripts/setup_backend.sh)
     env:
       TZ: Asia/Taipei
       FIFTH_DATA_DIR: ${{ github.workspace }}/data
@@ -123,33 +123,14 @@ jobs:
               gh workflow run weekly.yml --repo "$GITHUB_REPOSITORY"
             fi
           fi
-      # Nothing below runs while the website is paused: GitHub Pages keeps serving the last deployment.
-      - uses: actions/setup-node@v7.1.0
+      # Nothing below runs while the website is paused: the API keeps serving the last snapshot.
+      - uses: google-github-actions/auth@v3.0.0
         if: steps.publish.outputs.site == 'updated'
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Build dashboard
+          workload_identity_provider: projects/461716033038/locations/global/workloadIdentityPools/github/providers/fifth-estate-repo
+          service_account: fifth-estate-publisher@project-ec3ab1fc-4d15-40e8-a92.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3.0.1
         if: steps.publish.outputs.site == 'updated'
-        working-directory: web
-        run: |
-          npm ci
-          npm run build
-      - uses: actions/upload-pages-artifact@v5.0.0
+      - name: Upload snapshot (the API switches to it within a minute)
         if: steps.publish.outputs.site == 'updated'
-        with:
-          path: web/dist
-  deploy:
-    needs: build
-    if: needs.build.outputs.site == 'updated'
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5.0.1
+        run: gcloud storage cp build/serving/serving.sqlite.gz gs://project-ec3ab1fc-4d15-40e8-a92-serving/serving.sqlite.gz

@@ -8,7 +8,7 @@ import { Empty, ErrorState, Loading } from "../components/States";
 export default function Events() {
   const [w] = useWindowKey();
   const meta = useMeta();
-  const events = useData<IndexEntry[]>("events.json");
+  const events = useData<IndexEntry[]>("events");
   usePageTitle(PAGES.events.title);
   if (meta.error || events.error) return <ErrorState error={(meta.error ?? events.error)!} />;
   if (!meta.data || !events.data) return <Loading />;

@@ -187,19 +187,21 @@ def publish(
     summary: str = typer.Option(None),
     daily: bool = typer.Option(False, help="Also run the once-a-day jobs (subtopic discovery, public snapshot)"),
     skip_llm: bool = typer.Option(False, help="No LLM calls (event titles fall back to a member headline)"),
-    site_dir: str = typer.Option(None, help="Output dir for dashboard JSON (default web/public/data)"),
+    out: str = typer.Option(None, help="Snapshot to write (default build/serving/serving.sqlite, plus a .gz copy)"),
     force: bool = typer.Option(False, help="Update the website even while annotation is paused or catching up"),
     github_output: str = typer.Option(None, help="Append site=updated|paused to this file ($GITHUB_OUTPUT)"),
 ) -> None:
-    """Wire flags → events → (daily) subtopic discovery → metrics + JSON export.
+    """Wire flags → events → (daily) subtopic discovery → metrics → the API's serving snapshot.
 
-    While annotation is paused or catching up after the OpenAI quota ran out, only the wire flags are
-    updated (they need no LLM) and the website is left as it is."""
+    The publish workflow uploads the snapshot's .gz copy to Cloud Storage and the API switches to it within
+    a minute; nothing is redeployed. While annotation is paused or catching up after the OpenAI quota ran
+    out, only the wire flags are updated (they need no LLM) and no snapshot is written, so the website stays
+    as it is."""
     from pathlib import Path
 
     from .annotate import pause
     from .cluster import events, subtopics
-    from .export import site_data
+    from .export import serving, site_data
     from .ingest import dedupe
     from .llm.client import QuotaExhausted
     from .store import lake
@@ -226,9 +228,40 @@ def publish(
         _note("Website not updated", f"OpenAI quota used up. {e}", summary)
         site("paused")
         return
-    out = Path(site_dir) if site_dir else site_data.SITE_DATA
-    _report("export", site_data.export(out_dir=out, public_dir=site_data.PUBLIC_DATA if daily else None), summary)
+    db = Path(out) if out else serving.SERVING_DB
+    _report("export", site_data.export(db_path=db, public_dir=site_data.PUBLIC_DATA if daily else None, snapshot_id=run_id), summary)
     site("updated")
+
+
+@app.command()
+def export(out: str = typer.Option(None, help="Snapshot to write (default build/serving/serving.sqlite, plus a .gz copy)")) -> None:
+    """Build the API's serving snapshot from the lake as it is (reads only: no wire flags, events or LLM calls)."""
+    from pathlib import Path
+
+    from .export import serving, site_data
+
+    _report("export", site_data.export(db_path=Path(out) if out else serving.SERVING_DB, public_dir=None))
+
+
+@app.command()
+def serve(
+    db: str = typer.Option(None, help="Snapshot to serve (default build/serving/serving.sqlite)"),
+    host: str = typer.Option("127.0.0.1"),
+    port: int = typer.Option(8000),
+) -> None:
+    """Run the website's API locally on a snapshot file; `cd web && npm run dev` sends /v1 requests here.
+    A newer snapshot written to the same path (`fifth export` / `fifth publish`) is picked up within a minute."""
+    from pathlib import Path
+
+    import uvicorn
+
+    from .export import serving
+
+    path = Path(db).resolve() if db else serving.SERVING_DB
+    os.environ["FIFTH_SERVING_DB"] = str(path)
+    os.environ.pop("FIFTH_SERVING_BUCKET", None)
+    console.print(f"API on http://{host}:{port} (docs at /docs), serving {path}")
+    uvicorn.run("fifth_estate.api.app:app", host=host, port=port, log_level="warning")
 
 
 @app.command("gold-sample")

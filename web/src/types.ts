@@ -1,4 +1,4 @@
-// Mirrors the JSON written by src/fifth_estate/export/site_data.py
+// Mirrors the JSON served by the API (src/fifth_estate/api/app.py), built by src/fifth_estate/export/site_data.py
 
 export type WindowKey = "7" | "30" | "90";
 export type UnitKind = "all" | "category" | "topic" | "subtopic" | "event";
@@ -131,7 +131,6 @@ export interface UnitDoc {
   origin?: string;
   windows: Record<string, WindowMetrics>;
   trend?: TrendPoint[];
-  articles: Article[];
 }
 
 export interface IndexWindow {
@@ -176,5 +175,12 @@ export interface OutletDoc {
   baseline_china: number | null;
   weekly: { week_end: string; n: number; lean: number | null; china: number | null }[];
   topic_mix_30d: Record<string, number>;
+}
+
+/** GET /v1/articles: one page, newest first. The first page also counts the whole unit (all outlets). */
+export interface ArticlePage {
   articles: Article[];
+  next: string | null;
+  total?: number;
+  outlets?: Record<string, number>;
 }

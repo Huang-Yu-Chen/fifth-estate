@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { PAGES, SITE_DESCRIPTION, SITE_NAME, SITE_URL, outletDescription, pageTitle, unitDescription } from "./src/site.ts";
 import type { IndexDoc, Meta } from "./src/types.ts";
@@ -9,10 +9,14 @@ import type { IndexDoc, Meta } from "./src/types.ts";
 // as /unit/topic/defense. GitHub Pages has no rewrite rules, so after the build every route gets its own copy of
 // index.html (/events → events.html) with that page's title, description and canonical URL: each page loads with
 // status 200 and gets a proper link preview. Any other path is served 404.html, which runs the app as well.
-export default defineConfig({
-  plugins: [react(), routePages()],
+// The data comes from the API (VITE_API_BASE in .env.production), in the browser and for the list of routes
+// above, which is read when the site is built: a unit that appears later (a new event) is served by 404.html,
+// and still works, until the next build. `npm run dev` proxies /v1 to the local API (`uv run fifth serve`).
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), routePages(loadEnv(mode, process.cwd(), "VITE_").VITE_API_BASE ?? "")],
   build: { chunkSizeWarningLimit: 1200 },
-});
+  server: { proxy: { "/v1": "http://127.0.0.1:8000" } },
+}));
 
 interface Page {
   path: string;
@@ -20,7 +24,7 @@ interface Page {
   description: string;
 }
 
-function routePages(): Plugin {
+function routePages(api: string): Plugin {
   let dist = "";
   return {
     name: "route-pages",
@@ -28,16 +32,22 @@ function routePages(): Plugin {
     configResolved(config) {
       dist = resolve(config.root, config.build.outDir);
     },
-    closeBundle() {
-      const json = <T,>(file: string): T | undefined => {
+    async closeBundle() {
+      const json = async <T,>(path: string): Promise<T | undefined> => {
         try {
-          return JSON.parse(readFileSync(resolve(dist, "data", file), "utf8")) as T;
-        } catch {
-          return undefined; // built without dashboard data (web/public/data is written by `fifth publish`)
+          const r = await fetch(`${api.replace(/\/$/, "")}/v1/${path}`, { signal: AbortSignal.timeout(60_000) });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return (await r.json()) as T;
+        } catch (e) {
+          // In CI (site.yml) a site without its pages must not replace the deployed one; locally, carry on.
+          const msg = `route pages: no /v1/${path} from the API (${api || "VITE_API_BASE not set"}): ${e}`;
+          if (process.env.CI) throw new Error(msg);
+          console.warn(`${msg}; only the fixed pages get their own HTML`);
+          return undefined;
         }
       };
-      const meta = json<Meta>("meta.json");
-      const index = json<IndexDoc>("index.json") ?? {};
+      const meta = await json<Meta>("meta");
+      const index = (await json<IndexDoc>("index")) ?? {};
       // Kept out of search engines while the site is in beta (config/pipeline.yaml site.status), and test data always.
       const indexable = !!meta && !meta.fake_data && meta.site?.status !== "beta";
       const detail = new Map<string, string>([

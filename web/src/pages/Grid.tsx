@@ -22,7 +22,7 @@ export default function Grid() {
   const nav = useNavigate();
   const [metric, setMetric] = useState<Metric>("n");
   const meta = useMeta();
-  const grid = useData<GridDoc>("grid.json");
+  const grid = useData<GridDoc>("grid");
   usePageTitle(PAGES.grid.title);
 
   const option = useMemo<EChartsOption | null>(() => {

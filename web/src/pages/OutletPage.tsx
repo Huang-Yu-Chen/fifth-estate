@@ -13,7 +13,7 @@ export default function OutletPage() {
   const { id = "" } = useParams<{ id: string }>();
   const theme = useTheme();
   const meta = useMeta();
-  const doc = useData<OutletDoc>(`outlets/${id}.json`);
+  const doc = useData<OutletDoc>(`outlets/${encodeURIComponent(id)}`);
   usePageTitle(doc.data?.name);
 
   const trend = useMemo<EChartsOption | null>(() => {
@@ -64,7 +64,7 @@ export default function OutletPage() {
       </div>
       <section className="card">
         <h2>最新報導</h2>
-        <ArticleList articles={d.articles} meta={meta.data} theme={theme} />
+        <ArticleList key={id} outlet={id} meta={meta.data} theme={theme} />
       </section>
     </div>
   );

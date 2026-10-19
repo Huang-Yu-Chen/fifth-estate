@@ -1,26 +1,25 @@
-"""Write the static JSON the dashboard reads (web/public/data) and the small public snapshot (public-data/)."""
+"""Build the serving snapshot the API serves (export/serving.py) and the small public snapshot (public-data/)."""
 
 from __future__ import annotations
 
 import json
 import logging
-import shutil
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from statistics import mean
 
+from ..api import schema
 from ..cluster import taxonomy
 from ..cluster.events import latest_run
 from ..config import REPO_ROOT, TAIPEI, ingest_settings, load_yaml
 from ..llm.schemas import NEWS_TYPES
 from ..metrics import aggregate as agg
 from ..store import lake
+from .serving import SERVING_DB, SnapshotWriter
 
 log = logging.getLogger(__name__)
-SITE_DATA = REPO_ROOT / "web" / "public" / "data"
 PUBLIC_DATA = REPO_ROOT / "public-data"
-MAX_ARTICLES = 300
 
 
 def _dump(path: Path, obj) -> None:
@@ -64,7 +63,13 @@ def load_events(days: int = 16) -> dict[str, dict]:
     return {r["event_id"]: r for r in rs}
 
 
-def export(out_dir: Path = SITE_DATA, public_dir: Path | None = PUBLIC_DATA) -> dict:
+def export(db_path: Path = SERVING_DB, public_dir: Path | None = PUBLIC_DATA, snapshot_id: str | None = None) -> dict:
+    """Write the serving snapshot (and, when `public_dir` is given, the day's public snapshot)."""
+    with SnapshotWriter(db_path, snapshot_id or lake.new_run_id()) as out:
+        return _export(out, public_dir)
+
+
+def _export(out: SnapshotWriter, public_dir: Path | None) -> dict:
     now = agg.now_utc()
     cfg = load_yaml("pipeline.yaml")
     windows: list[int] = cfg["windows"]
@@ -84,10 +89,9 @@ def export(out_dir: Path = SITE_DATA, public_dir: Path | None = PUBLIC_DATA) -> 
     def totals_between(start: datetime, end: datetime) -> dict[str, int]:
         return totals([r for r in rows if r["published_at"] and start < r["published_at"] <= end])
 
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
     units = agg.units_for(rows, tax, events)
     index: dict[str, list[dict]] = defaultdict(list)  # kind -> summaries
+    member: dict[str, dict[str, str]] = defaultdict(dict)  # article id -> {unit kind: unit id}, for the API's lists
     grid: dict[str, dict] = {str(w): defaultdict(dict) for w in windows}
 
     for i, ((kind, uid), (unit, urows)) in enumerate(sorted(units.items())):
@@ -124,9 +128,10 @@ def export(out_dir: Path = SITE_DATA, public_dir: Path | None = PUBLIC_DATA) -> 
             doc["trend"] = agg.trend(urows, totals_between, base_lean, p, now) if kind in ("all", "category", "topic", "subtopic") else []
             summary_metrics = doc["windows"].get(str(windows[0])) or doc["windows"].get(str(windows[-1]))
 
-        arts = sorted(urows, key=lambda r: r["published_at"] or now, reverse=True)[:MAX_ARTICLES]
-        doc["articles"] = [article_dict(r) for r in arts]
-        _dump(out_dir / "units" / kind / f"{uid}.json", doc)
+        if kind in schema.UNIT_COLUMN:
+            for r in urows:
+                member[r["article_id"]][kind] = uid
+        out.doc(schema.unit_doc(kind, uid), doc)
 
         index[kind].append(
             {
@@ -142,7 +147,12 @@ def export(out_dir: Path = SITE_DATA, public_dir: Path | None = PUBLIC_DATA) -> 
             }
         )
 
-    # outlets: baseline + weekly series + topic mix + recent articles
+    # Every article once; the API pages through them per unit or outlet, newest first.
+    for r in rows:
+        ts = int(r["published_at"].timestamp()) if r["published_at"] else 0
+        out.article(article_dict(r), ts, member.get(r["article_id"], {}))
+
+    # outlets: baseline + weekly series + topic mix (their articles come from the API's lists)
     outlet_meta = []
     for o in settings.outlets:
         ors = [r for r in rows if r["outlet_id"] == o.id]
@@ -155,11 +165,10 @@ def export(out_dir: Path = SITE_DATA, public_dir: Path | None = PUBLIC_DATA) -> 
             weekly.append({"week_end": end.date().isoformat(), "n": len(wk),
                            "lean": round(mean(lean), 2) if lean else None, "china": round(mean(china), 2) if china else None})
         mix = Counter(r["topic_id"] for r in agg.window_rows(ors, 30, now))
-        _dump(out_dir / "outlets" / f"{o.id}.json", {
+        out.doc(schema.outlet_doc(o.id), {
             "id": o.id, "name": o.name, "short": o.short, "via": o.via,
             "baseline_lean": base_lean.get(o.id), "baseline_china": base_china.get(o.id),
             "weekly": weekly, "topic_mix_30d": dict(mix.most_common()),
-            "articles": [article_dict(r) for r in sorted(ors, key=lambda r: r["published_at"] or now, reverse=True)[:100]],
         })
         outlet_meta.append({"id": o.id, "name": o.name, "short": o.short, "via": o.via,
                             "baseline_lean": base_lean.get(o.id), "baseline_china": base_china.get(o.id),
@@ -185,11 +194,12 @@ def export(out_dir: Path = SITE_DATA, public_dir: Path | None = PUBLIC_DATA) -> 
         "counts": {"articles_in_scope": len(rows), "scored": sum(1 for r in rows if r["lean"] is not None),
                    **{f"window_{w}": len(win_rows[w]) for w in windows}},
     }
-    _dump(out_dir / "meta.json", meta)
-    _dump(out_dir / "index.json", {k: v for k, v in index.items()})
-    _dump(out_dir / "grid.json", {w: {o: dict(c) for o, c in g.items()} for w, g in grid.items()})
+    out.doc("meta", meta)
+    out.doc("index", {k: v for k, v in index.items()})
+    out.doc("grid", {w: {o: dict(c) for o, c in g.items()} for w, g in grid.items()})
     recent_events = sorted(index.get("event", []), key=lambda e: e.get("last") or "", reverse=True)
-    _dump(out_dir / "events.json", recent_events[:200])
+    out.doc("events", recent_events[:200])
+    out.finish(generated_at=meta["generated_at"], fake_data=meta["fake_data"])
 
     if public_dir is not None:
         day = now.astimezone(TAIPEI).date().isoformat()
@@ -205,4 +215,5 @@ def export(out_dir: Path = SITE_DATA, public_dir: Path | None = PUBLIC_DATA) -> 
             "outlets": outlet_meta,
         }
         _dump(public_dir / f"{day}.json", snap)
-    return {"units": sum(len(v) for v in index.values()), "articles": len(rows), "scored": meta["counts"]["scored"], "events": len(index.get("event", []))}
+    return {"snapshot": out.id, "units": sum(len(v) for v in index.values()), "articles": len(rows), "scored": meta["counts"]["scored"],
+            "events": len(index.get("event", []))}
