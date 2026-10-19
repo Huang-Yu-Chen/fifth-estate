@@ -12,9 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from openai import OpenAI
+from openai import APIStatusError, OpenAI
 
 from ..store import lake, state
+from .client import is_quota_error, raise_if_quota
 
 log = logging.getLogger(__name__)
 STATE = "batches.json"
@@ -27,6 +28,7 @@ class BatchLine:
     custom_id: str
     body: dict[str, Any] | None  # the Response object, or None on error
     error: str | None
+    quota: bool = False  # failed because the account ran out of quota, not because of the request
 
 
 def pending(task: str | None = None) -> list[dict]:
@@ -53,6 +55,9 @@ def submit(client: OpenAI, task: str, requests: list[tuple[str, dict[str, Any]]]
             completion_window="24h",
             metadata={"task": task, **{k: str(v)[:500] for k, v in meta.items()}},
         )
+    except APIStatusError as e:
+        raise_if_quota(e)
+        raise
     finally:
         path.unlink(missing_ok=True)
     rec = {
@@ -92,11 +97,13 @@ def collect(client: OpenAI, task: str) -> tuple[list[BatchLine], list[dict]]:
         for row in _read_file(client, b.output_file_id):
             resp = row.get("response") or {}
             ok = resp.get("status_code") == 200
-            lines.append(BatchLine(b.id, row["custom_id"], resp.get("body") if ok else None, None if ok else json.dumps(resp.get("body"))[:500]))
+            body = resp.get("body")
+            lines.append(BatchLine(b.id, row["custom_id"], body if ok else None, None if ok else json.dumps(body)[:500], not ok and is_quota_error(body)))
             seen.add(row["custom_id"])
         for row in _read_file(client, b.error_file_id):
             if row["custom_id"] not in seen:
-                lines.append(BatchLine(b.id, row["custom_id"], None, json.dumps(row.get("error") or row.get("response"))[:500]))
+                quota = is_quota_error(row.get("error")) or is_quota_error((row.get("response") or {}).get("body"))
+                lines.append(BatchLine(b.id, row["custom_id"], None, json.dumps(row.get("error") or row.get("response"))[:500], quota))
                 seen.add(row["custom_id"])
         # Requests that never came back (expired/cancelled batches) are simply resubmitted later.
         rec["status"] = "collected" if b.status == "completed" else b.status

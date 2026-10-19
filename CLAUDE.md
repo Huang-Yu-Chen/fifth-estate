@@ -10,7 +10,7 @@ Scheduling: Google Cloud Scheduler jobs `fifth-estate-ingest` (hourly :07) and `
 fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`). GitHub cron is backup only.
 
 ## Commands
-- `uv run fifth ingest|annotate|stage1|stage2|embed|publish|stats` — pipeline steps (see `src/fifth_estate/cli.py`)
+- `uv run fifth ingest|annotate|stage1|stage2|embed|publish|stats|status` — pipeline steps (see `src/fifth_estate/cli.py`)
 - `uv run fifth gold-sample | label --coder X | eval --coder X --models a:low,b:low` — validation
 - `uv run pytest` — tests; `cd web && npm run build` — dashboard (Vite + React + ECharts, zh-TW)
 - Dev without an API key: `FIFTH_DATA_DIR=../fifth-estate-data-local uv run python scripts/dev_fake_annotations.py`
@@ -27,6 +27,11 @@ fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`)
   and `robots.txt` (`web/vite.config.ts`; page copy in `web/src/site.ts`). Old `#/…` links are converted in `main.tsx`.
 - Lake: append-only zstd Parquet `{table}/date=YYYY-MM-DD/*.parquet`, DuckDB queries; superseded rows are
   resolved with `lake.latest()` (newest `created_at` per key). Schemas in `store/schemas.py`.
+- OpenAI quota used up (`llm.client.QUOTA_CODES`) → `annotate` pauses instead of failing (`annotate/pause.py`,
+  state in the data repo's `state/pause.json`): the crawl continues, paused runs only probe with a one-word
+  embedding, publish updates wire flags but not the site. When the quota is back the backlog is labeled
+  newest first with the look-back reaching the outage start, and the site resumes once nothing is left.
+  A quota failure is never recorded as an attempt. `fifth status` shows the state; `publish --force` overrides.
 
 ## Decisions (from the user, 2026-10-13)
 - Crawl politics/兩岸/國際 sections only (no homepage scraping); 中時/民視 via Yahoo provider archives

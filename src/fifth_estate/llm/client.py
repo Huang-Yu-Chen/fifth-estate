@@ -13,11 +13,13 @@ from typing import Any
 
 from openai import (
     APIConnectionError,
+    APIStatusError,
     APITimeoutError,
     AsyncOpenAI,
     BadRequestError,
     InternalServerError,
     OpenAI,
+    OpenAIError,
     RateLimitError,
 )
 from openai.lib._parsing._responses import type_to_text_format_param
@@ -57,6 +59,56 @@ def sync_client() -> OpenAI:
 def async_client() -> AsyncOpenAI:
     require_key()
     return AsyncOpenAI(timeout=900, max_retries=0)
+
+
+# --------------------------------------------------------------------------- quota
+
+# Error codes for an account that is out of quota: prepaid credits used up, an organization or project
+# spend limit or usage limit reached, billing inactive (older responses say insufficient_quota, also as the
+# error type, or billing_hard_limit_reached). Retrying cannot help, so annotation pauses until the quota is
+# back (annotate/pause.py). Ordinary 429s (rate limits, flex capacity) are not in this list and are retried.
+QUOTA_CODES = frozenset(
+    {
+        "insufficient_quota",
+        "credit_balance_exhausted",
+        "organization_spend_limit_exceeded",
+        "project_spend_limit_exceeded",
+        "organization_usage_limit_exceeded",
+        "usage_limit_exceeded",
+        "billing_not_active",
+        "billing_hard_limit_reached",
+    }
+)
+
+
+class QuotaExhausted(RuntimeError):
+    """OpenAI refuses paid requests until the account has quota again."""
+
+
+def is_quota_error(err: object) -> bool:
+    """For SDK exceptions and for the error objects in Batch output and error files."""
+    if isinstance(err, APIStatusError):
+        return err.code in QUOTA_CODES or err.type in QUOTA_CODES
+    if isinstance(err, dict):
+        e = err.get("error") or err
+        return isinstance(e, dict) and (e.get("code") in QUOTA_CODES or e.get("type") in QUOTA_CODES)
+    return False
+
+
+def raise_if_quota(err: Exception) -> None:
+    if is_quota_error(err):
+        raise QuotaExhausted(f"{type(err).__name__}: {err}"[:500]) from err
+
+
+def check_quota() -> OpenAIError | None:
+    """The smallest paid request there is (one word embedded, a fraction of a millionth of a dollar).
+    Returns None when OpenAI accepts it, otherwise the error."""
+    cfg = task_config("embed")
+    try:
+        sync_client().with_options(timeout=60, max_retries=2).embeddings.create(model=cfg.model, input="ok", dimensions=cfg.dimensions)
+    except OpenAIError as e:
+        return e
+    return None
 
 
 def _explicit_cache(model: str) -> bool:
@@ -172,7 +224,8 @@ def cost_usd(model: str, usage: dict[str, int], tier: str) -> float:
 async def call_async(
     client: AsyncOpenAI, body: dict[str, Any], schema: type[BaseModel], tier: str, attempts: int = 5
 ) -> Result:
-    """One request. Flex 429s ("resource unavailable") are retried, then fall back to default."""
+    """One request. Flex 429s ("resource unavailable") are retried, then fall back to default.
+    Raises QuotaExhausted at once when the account is out of quota."""
     delay = 5.0
     last = "unknown error"
     t0 = time.monotonic()
@@ -184,10 +237,12 @@ async def call_async(
             res.latency = time.monotonic() - t0
             return res
         except RateLimitError as e:
+            raise_if_quota(e)
             last = f"RateLimitError: {e}"
         except (APITimeoutError, APIConnectionError, InternalServerError) as e:
             last = f"{type(e).__name__}: {e}"
         except BadRequestError as e:
+            raise_if_quota(e)
             return Result(None, "error", f"BadRequestError: {e}"[:500], {}, use_tier)
         await asyncio.sleep(delay)
         delay *= 2

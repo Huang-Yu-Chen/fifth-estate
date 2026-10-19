@@ -2,6 +2,8 @@ name: publish
 # Every 3 hours: wire flags → events → metrics/polarization → dashboard JSON → GitHub Pages.
 # The first run after 20:00 (Taipei) each day also does subtopic discovery and commits a small public
 # snapshot to public-data/ (scheduled runs can be dropped, so this is not tied to one exact run).
+# While annotation is paused (OpenAI quota used up) or still labeling the backlog afterwards, only the
+# wire flags are updated and the website is left as it is (src/fifth_estate/annotate/pause.py).
 # Primary trigger: Google Cloud Scheduler (job fifth-estate-publish, :27 every 3 hours); cron is a backup.
 on:
   schedule:
@@ -10,6 +12,10 @@ on:
     inputs:
       daily:
         description: Run the daily jobs too
+        type: boolean
+        default: false
+      force:
+        description: Update the website even while annotation is paused or catching up
         type: boolean
         default: false
 permissions:
@@ -21,6 +27,8 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    outputs:
+      site: ${{ steps.publish.outputs.site }}
     permissions:
       contents: write   # public-data snapshot commit
       actions: write    # dispatch the weekly report
@@ -49,7 +57,8 @@ jobs:
               d=$(date -d "-$i day" +%F)
               for t in articles stage1 stage2 subtopic_assignments article_flags event_members; do echo "/$t/date=$d/"; done
               if [ "$i" -le 20 ]; then echo "/events/date=$d/"; fi
-              if [ "$i" -le 5 ]; then echo "/embeddings/date=$d/"; fi
+              # 20 days: after a pause, the events of the skipped days (up to 15) are computed too
+              if [ "$i" -le 20 ]; then echo "/embeddings/date=$d/"; fi
               if [ "$i" -le 2 ]; then echo "/llm_usage/date=$d/"; fi
             done
             echo 'EOF'
@@ -68,11 +77,13 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - name: Publish
+        id: publish
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: >-
-          uv run fifth publish --summary "$GITHUB_STEP_SUMMARY"
+          uv run fifth publish --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT"
           ${{ steps.when.outputs.daily == 'true' && '--daily' || '' }}
+          ${{ inputs.force && '--force' || '' }}
       - name: Commit data
         if: always()
         working-directory: data
@@ -88,7 +99,7 @@ jobs:
           done
           exit 1
       - name: Commit public snapshot
-        if: steps.when.outputs.daily == 'true'
+        if: steps.when.outputs.daily == 'true' && steps.publish.outputs.site == 'updated'
         run: |
           git config user.name "fifth-estate-bot"
           git config user.email "fifth-estate-bot@users.noreply.github.com"
@@ -112,21 +123,26 @@ jobs:
               gh workflow run weekly.yml --repo "$GITHUB_REPOSITORY"
             fi
           fi
+      # Nothing below runs while the website is paused: GitHub Pages keeps serving the last deployment.
       - uses: actions/setup-node@v7.1.0
+        if: steps.publish.outputs.site == 'updated'
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Build dashboard
+        if: steps.publish.outputs.site == 'updated'
         working-directory: web
         run: |
           npm ci
           npm run build
       - uses: actions/upload-pages-artifact@v5.0.0
+        if: steps.publish.outputs.site == 'updated'
         with:
           path: web/dist
   deploy:
     needs: build
+    if: needs.build.outputs.site == 'updated'
     runs-on: ubuntu-24.04
     permissions:
       pages: write

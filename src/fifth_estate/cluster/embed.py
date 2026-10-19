@@ -6,6 +6,7 @@ import hashlib
 import logging
 
 import numpy as np
+from openai import APIStatusError
 
 from ..config import ingest_settings
 from ..ingest.clean import blind, clean_title
@@ -23,10 +24,9 @@ def embed_text(row: dict) -> str:
     return title + "\n" + "\n".join(row["takeaways"] or [])
 
 
-def select_pending(limit: int, days: int = 7) -> list[dict]:
+def _pending_sql(days: int) -> str:
     scopes = ", ".join(f"'{s}'" for s in IN_SCOPE)
-    return lake.rows(
-        f"""
+    return f"""
         WITH s1 AS (SELECT * FROM {lake.latest('stage1', days=days + 1, where="status = 'ok'")}),
         a AS (
             SELECT article_id, outlet_id, title, published_at FROM {lake.source('articles', days)}
@@ -36,10 +36,15 @@ def select_pending(limit: int, days: int = 7) -> list[dict]:
         SELECT a.article_id, a.outlet_id, a.title, s1.takeaways
         FROM s1 JOIN a USING (article_id) LEFT JOIN e USING (article_id)
         WHERE s1.scope IN ({scopes}) AND e.article_id IS NULL
-        ORDER BY a.published_at DESC NULLS LAST
-        LIMIT {int(limit)}
         """
-    )
+
+
+def select_pending(limit: int, days: int = 7) -> list[dict]:
+    return lake.rows(f"{_pending_sql(days)} ORDER BY a.published_at DESC NULLS LAST LIMIT {int(limit)}")
+
+
+def count_pending(days: int = 7) -> int:
+    return lake.rows(f"SELECT count(*) AS n FROM ({_pending_sql(days)})")[0]["n"]
 
 
 def to_f16(vec: list[float]) -> bytes:
@@ -50,35 +55,9 @@ def from_f16(b: bytes) -> np.ndarray:
     return np.frombuffer(b, dtype=np.float16).astype(np.float32)
 
 
-def run(limit: int, run_id: str | None = None) -> dict:
-    run_id = run_id or lake.new_run_id()
-    cfg = llm.task_config("embed")
-    rows = select_pending(limit)
-    if not rows:
-        return {"embedded": 0}
-    if llm.spent_today() >= llm.daily_budget():
-        return {"embedded": 0, "budget_exhausted": True}
-    client = llm.sync_client()
-    out, tokens = [], 0
-    for i in range(0, len(rows), CHUNK):
-        chunk = rows[i : i + CHUNK]
-        texts = [embed_text(r) for r in chunk]
-        resp = client.embeddings.create(model=cfg.model, input=texts, dimensions=cfg.dimensions)
-        tokens += resp.usage.total_tokens
-        for r, t, d in zip(chunk, texts, resp.data):
-            out.append(
-                {
-                    "article_id": r["article_id"],
-                    "model": cfg.model,
-                    "dims": cfg.dimensions,
-                    "text_hash": hashlib.sha1(t.encode()).hexdigest()[:12],
-                    "vector_f16": to_f16(d.embedding),
-                    "input_tokens": resp.usage.total_tokens // max(len(chunk), 1),
-                    "cost_usd": llm.cost_usd(cfg.model, {"input_tokens": resp.usage.total_tokens // max(len(chunk), 1)}, "default"),
-                    "created_at": lake.now_utc(),
-                    "run_id": run_id,
-                }
-            )
+def _save(out: list[dict], tokens: int, cfg: llm.TaskConfig, run_id: str) -> float:
+    if not out:
+        return 0.0
     lake.write("embeddings", out, run_id)
     cost = llm.cost_usd(cfg.model, {"input_tokens": tokens}, "default")
     lake.write(
@@ -87,4 +66,43 @@ def run(limit: int, run_id: str | None = None) -> dict:
           "cached_tokens": 0, "output_tokens": 0, "cost_usd": cost, "created_at": lake.now_utc(), "run_id": run_id}],
         run_id,
     )
+    return cost
+
+
+def run(limit: int, run_id: str | None = None, days: int = 7) -> dict:
+    run_id = run_id or lake.new_run_id()
+    cfg = llm.task_config("embed")
+    rows = select_pending(limit, days)
+    if not rows:
+        return {"embedded": 0}
+    if llm.spent_today() >= llm.daily_budget():
+        return {"embedded": 0, "budget_exhausted": True}
+    client = llm.sync_client()
+    out, tokens = [], 0
+    try:
+        for i in range(0, len(rows), CHUNK):
+            chunk = rows[i : i + CHUNK]
+            texts = [embed_text(r) for r in chunk]
+            try:
+                resp = client.embeddings.create(model=cfg.model, input=texts, dimensions=cfg.dimensions)
+            except APIStatusError as e:
+                llm.raise_if_quota(e)
+                raise
+            tokens += resp.usage.total_tokens
+            for r, t, d in zip(chunk, texts, resp.data):
+                out.append(
+                    {
+                        "article_id": r["article_id"],
+                        "model": cfg.model,
+                        "dims": cfg.dimensions,
+                        "text_hash": hashlib.sha1(t.encode()).hexdigest()[:12],
+                        "vector_f16": to_f16(d.embedding),
+                        "input_tokens": resp.usage.total_tokens // max(len(chunk), 1),
+                        "cost_usd": llm.cost_usd(cfg.model, {"input_tokens": resp.usage.total_tokens // max(len(chunk), 1)}, "default"),
+                        "created_at": lake.now_utc(),
+                        "run_id": run_id,
+                    }
+                )
+    finally:  # keep the chunks already paid for, also when a later one fails (e.g. the quota ran out)
+        cost = _save(out, tokens, cfg, run_id)
     return {"embedded": len(out), "cost_usd": round(cost, 4)}

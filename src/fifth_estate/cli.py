@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.markup import escape
 from rich.table import Table
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="第五權 The Fifth Estate pipeline")
@@ -72,14 +74,25 @@ def _report(name: str, d: dict, summary: str | None = None) -> None:
             f.write(f"- **{name}**: " + ", ".join(f"{k}={v}" for k, v in d.items()) + "\n")
 
 
+def _note(title: str, detail: str, summary: str | None = None, level: str = "warning") -> None:
+    """Something to notice that is not a failure; also shown on the GitHub Actions run page (warning|notice)."""
+    console.print(f"[yellow]{title}:[/] {escape(detail)}")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as f:
+            f.write(f"- **{title}**: {detail}\n")
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::{level} title={title}::" + detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))
+
+
 @app.command()
 def stage1(limit: int = typer.Option(None, help="Max articles (default: models.yaml limits)"), summary: str = typer.Option(None)) -> None:
     """Stage 1: in-scope filter, takeaways, topic/subtopic, news type."""
+    from .annotate import pause
     from .annotate import stage1 as s1
     from .config import load_yaml
 
     limit = limit or load_yaml("models.yaml")["limits"]["stage1_per_run"]
-    _report("stage1", s1.run(limit), summary)
+    _report("stage1", s1.run(limit, days=pause.lookback_days()), summary)
 
 
 @app.command()
@@ -89,6 +102,7 @@ def stage2(
     summary: str = typer.Option(None),
 ) -> None:
     """Stage 2: tone, 綠藍 lean, 抗中友中 stance."""
+    from .annotate import pause
     from .annotate import stage2 as s2
     from .config import load_yaml
     from .store import lake
@@ -98,7 +112,7 @@ def stage2(
     if mode in ("batch", "collect"):
         _report("stage2 collect", s2.collect(run_id), summary)
     if mode in ("batch", "submit"):
-        _report("stage2 submit", s2.submit(limit, run_id), summary)
+        _report("stage2 submit", s2.submit(limit, run_id, days=pause.lookback_days()), summary)
     if mode == "sync":
         _report("stage2 sync", s2.run_sync(limit, run_id)[0], summary)
 
@@ -106,15 +120,21 @@ def stage2(
 @app.command()
 def embed(limit: int = typer.Option(2000), summary: str = typer.Option(None)) -> None:
     """Embed in-scope articles (title + takeaways) for event clustering."""
+    from .annotate import pause
     from .cluster import embed as em
 
-    _report("embed", em.run(limit), summary)
+    _report("embed", em.run(limit, days=pause.lookback_days()), summary)
 
 
 @app.command()
 def annotate(summary: str = typer.Option(None)) -> None:
-    """Everything the hourly job does after ingest: stage1 → stage2 (collect + submit) → embed."""
-    import os
+    """Everything the hourly job does after ingest: stage1 → stage2 (collect + submit) → embed.
+
+    When the OpenAI quota is used up this pauses instead of failing (see annotate/pause.py): later runs
+    only check whether the quota is back, ingest keeps going, and publish leaves the website as it is
+    until the backlog is labeled."""
+    from .annotate import pause
+    from .llm.client import QuotaExhausted, check_quota, is_quota_error
 
     if not os.environ.get("OPENAI_API_KEY"):
         console.print("[yellow]OPENAI_API_KEY not set — skipping annotation[/]")
@@ -122,9 +142,44 @@ def annotate(summary: str = typer.Option(None)) -> None:
             with open(summary, "a", encoding="utf-8") as f:
                 f.write("- annotation skipped: OPENAI_API_KEY not set\n")
         return
-    stage1(limit=None, summary=summary)
-    stage2(mode="batch", limit=None, summary=summary)
-    embed(limit=2000, summary=summary)
+    st = pause.load()
+    if st["status"] == "paused":
+        err = check_quota()
+        if err is not None:
+            msg = f"{type(err).__name__}: {err}"[:500]
+            pause.still_paused(msg)
+            if not is_quota_error(err):  # e.g. a revoked key: someone has to act, so fail the step
+                raise SystemExit(f"OpenAI quota check failed; annotation stays paused. {msg}")
+            _note("OpenAI quota still used up", f"annotation paused since {pause.local(st['since'])} (Taipei); crawling continues, website not updated. {msg}", summary)
+            return
+        st = pause.resume()
+        _note("OpenAI quota is back", "labeling the backlog; the website resumes once it is done", summary, level="notice")
+    try:
+        stage1(limit=None, summary=summary)
+        stage2(mode="batch", limit=None, summary=summary)
+        embed(limit=2000, summary=summary)
+    except QuotaExhausted as e:
+        pause.pause(str(e))
+        _note("OpenAI quota used up", f"annotation paused; crawling continues and the website stays as it is until the quota is back. {e}", summary)
+        return
+    if st["status"] == "catching_up":
+        st = pause.finish_run(pause.lookback_days(st))
+        _report("catch-up", st.get("backlog", {}) if st["status"] == "catching_up" else {"done": "website resumes at the next publish"}, summary)
+
+
+@app.command()
+def status(github_output: str = typer.Option(None, help="Append paused=… and lookback_days=… to this file ($GITHUB_OUTPUT)")) -> None:
+    """Whether annotation, and with it the website, is paused because the OpenAI quota ran out."""
+    from .annotate import pause
+
+    st = pause.load()
+    days = pause.lookback_days(st)
+    console.print(f"[bold]{st['status']}[/]: {escape(pause.describe(st))}; annotation looks back {days} days")
+    if st.get("error"):
+        console.print(escape(st["error"]))
+    if github_output:
+        with open(github_output, "a", encoding="utf-8") as f:
+            f.write(f"paused={str(pause.site_paused(st)).lower()}\nlookback_days={days}\n")
 
 
 @app.command()
@@ -133,24 +188,47 @@ def publish(
     daily: bool = typer.Option(False, help="Also run the once-a-day jobs (subtopic discovery, public snapshot)"),
     skip_llm: bool = typer.Option(False, help="No LLM calls (event titles fall back to a member headline)"),
     site_dir: str = typer.Option(None, help="Output dir for dashboard JSON (default web/public/data)"),
+    force: bool = typer.Option(False, help="Update the website even while annotation is paused or catching up"),
+    github_output: str = typer.Option(None, help="Append site=updated|paused to this file ($GITHUB_OUTPUT)"),
 ) -> None:
-    """Wire flags → events → (daily) subtopic discovery → metrics + JSON export."""
-    import os
+    """Wire flags → events → (daily) subtopic discovery → metrics + JSON export.
+
+    While annotation is paused or catching up after the OpenAI quota ran out, only the wire flags are
+    updated (they need no LLM) and the website is left as it is."""
     from pathlib import Path
 
+    from .annotate import pause
     from .cluster import events, subtopics
     from .export import site_data
     from .ingest import dedupe
+    from .llm.client import QuotaExhausted
     from .store import lake
+
+    def site(result: str) -> None:
+        if github_output:
+            with open(github_output, "a", encoding="utf-8") as f:
+                f.write(f"site={result}\n")
 
     run_id = lake.new_run_id()
     has_key = bool(os.environ.get("OPENAI_API_KEY")) and not skip_llm
     _report("wire flags", dedupe.run(run_id=run_id), summary)
-    _report("events", events.run(run_id=run_id, use_llm=has_key), summary)
-    if daily and has_key:
-        _report("subtopics", subtopics.run(run_id=run_id), summary)
+    if pause.site_paused() and not force:
+        _note("Website not updated", pause.describe(), summary)
+        site("paused")
+        return
+    try:
+        for d in events.missed_days():
+            _report(f"events {d}", events.run(window_end=d, run_id=run_id, use_llm=has_key), summary)
+        _report("events", events.run(run_id=run_id, use_llm=has_key), summary)
+        if daily and has_key:
+            _report("subtopics", subtopics.run(run_id=run_id), summary)
+    except QuotaExhausted as e:  # ran out between the last annotate run and now; annotate pauses next hour
+        _note("Website not updated", f"OpenAI quota used up. {e}", summary)
+        site("paused")
+        return
     out = Path(site_dir) if site_dir else site_data.SITE_DATA
     _report("export", site_data.export(out_dir=out, public_dir=site_data.PUBLIC_DATA if daily else None), summary)
+    site("updated")
 
 
 @app.command("gold-sample")
@@ -199,6 +277,7 @@ def weekly_report(out: str = typer.Option(..., help="Markdown file to write")) -
     """Scraper health, LLM spend, subtopic changes and the week's validation sample (for the weekly Issue)."""
     from pathlib import Path
 
+    from .annotate import pause
     from .config import data_dir
     from .store import lake
     from .validate import sample
@@ -214,7 +293,14 @@ def weekly_report(out: str = typer.Option(..., help="Markdown file to write")) -
     )
     spend = lake.rows(f"SELECT task, model, round(sum(cost_usd), 3) AS usd, sum(n_requests) AS req FROM {lake.source('llm_usage', 7)} GROUP BY ALL ORDER BY usd DESC")
     changelog = data_dir() / "registry" / "changelog.md"
-    lines = [f"## 第五權週報 {week}", "", "### 抓取健康度（近 7 天）", "", "| 媒體 | 成功 | 失敗 | 最後成功 |", "|---|---|---|---|"]
+    lines = [f"## 第五權週報 {week}", ""]
+    st = pause.load()
+    if st["status"] == "paused":
+        lines += [f"> ⚠ OpenAI 額度用完：自 {pause.local(st['since'])} 起暫停 AI 標註，網站停在當時的資料。新聞仍照常收集，額度恢復後會自動補標，補完再恢復更新網站。", ""]
+    elif st["status"] == "catching_up":
+        left = pause.left(st, unit=" 篇", sep="、") or "尚未清點"
+        lines += [f"> OpenAI 額度已於 {pause.local(st.get('resumed_at'))} 恢復，正在補標暫停期間收集的新聞（剩 {left}）；補完後網站恢復更新。", ""]
+    lines += ["### 抓取健康度（近 7 天）", "", "| 媒體 | 成功 | 失敗 | 最後成功 |", "|---|---|---|---|"]
     from .config import TAIPEI
 
     lines += [f"| {h['outlet_id']} | {h['ok']} | {h['failed']} | {h['last_ok'].astimezone(TAIPEI):%m-%d %H:%M} |" if h["last_ok"]

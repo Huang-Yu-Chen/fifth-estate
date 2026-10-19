@@ -5,6 +5,10 @@ import { shortTime } from "../format";
 import type { WindowKey } from "../types";
 import { Loading } from "./States";
 
+// The site is rebuilt every 3 hours; data this much older means updates have stopped (e.g. paused while
+// the OpenAI quota is used up), and the "last 7 days" are no longer the last 7 days.
+const STALE_HOURS = 12;
+
 const NAV = [
   { to: "/", label: "總覽", end: true },
   { to: "/coverage", label: "報導量" },
@@ -39,11 +43,17 @@ export default function Layout() {
   }, [pathname]);
   const keep = new URLSearchParams(search).get("w");
   const q = keep ? `?w=${keep}` : "";
+  const stale = meta && Date.now() - Date.parse(meta.generated_at) > STALE_HOURS * 3_600_000;
   return (
     <>
       {meta?.site?.status === "beta" && !meta.fake_data && (
         <div className="banner" role="status">
           Beta：AI 標註仍在與人工標註比對驗證中，分數僅供參考，請勿當作定論引用。
+        </div>
+      )}
+      {stale && (
+        <div className="banner" role="status">
+          資料暫停更新：目前顯示的是 {shortTime(meta.generated_at)} 的分析結果。
         </div>
       )}
       {meta?.fake_data && (

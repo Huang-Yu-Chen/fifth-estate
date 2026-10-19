@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 
 from openai.lib._parsing._responses import type_to_text_format_param
 
@@ -29,12 +30,9 @@ def setup(cfg: llm.TaskConfig | None = None) -> tuple[llm.TaskConfig, str, str]:
     return cfg, system, phash
 
 
-def select_pending(limit: int, days: int = 7, exclude: set[str] | None = None, phash: str | None = None) -> list[dict]:
-    """In-scope articles without a successful label from the current prompt version. Never-labeled
-    articles come first; articles labeled with an older codebook are re-labeled after them."""
+def _pending(days: int, phash: str, cols: str, tail: str) -> list[dict]:
     scopes = ", ".join(f"'{s}'" for s in IN_SCOPE)
-    phash = phash or setup()[2]
-    rows = lake.rows(
+    return lake.rows(
         f"""
         WITH s1 AS (SELECT * FROM {lake.latest('stage1', days=days + 1, where="status = 'ok'")}),
         a AS (
@@ -48,15 +46,31 @@ def select_pending(limit: int, days: int = 7, exclude: set[str] | None = None, p
                    count(*) FILTER (WHERE prompt_hash = ?) AS n_current
             FROM {lake.source('stage2', days + 1)} GROUP BY article_id
         )
-        SELECT a.article_id, a.outlet_id, a.title, a.body, a.published_at
+        SELECT {cols}
         FROM s1 JOIN a USING (article_id) LEFT JOIN s2 USING (article_id)
         WHERE s1.scope IN ({scopes}) AND NOT coalesce(s2.ok_current, false) AND coalesce(s2.n_current, 0) < {MAX_ATTEMPTS}
-        ORDER BY coalesce(s2.ok_any, false), a.published_at DESC NULLS LAST
+        {tail}
         """,
         [phash, phash],
     )
+
+
+def select_pending(limit: int, days: int = 7, exclude: set[str] | None = None, phash: str | None = None) -> list[dict]:
+    """In-scope articles without a successful label from the current prompt version. Never-labeled
+    articles come first; articles labeled with an older codebook are re-labeled after them."""
+    rows = _pending(days, phash or setup()[2], "a.article_id, a.outlet_id, a.title, a.body, a.published_at",
+                    "ORDER BY coalesce(s2.ok_any, false), a.published_at DESC NULLS LAST")
     exclude = exclude or set()
     return [r for r in rows if f"{TASK}:{r['article_id']}" not in exclude][:limit]
+
+
+def count_unlabeled(days: int = 7, exclude: set[str] | None = None, before: datetime | None = None) -> int:
+    """In-scope articles with no Stage 2 label at all (re-labels after a codebook change are not counted).
+    Articles waiting in a batch (`exclude`) count only when fetched before `before`: after a pause, the
+    backlog is done once its last batch is back, whatever newer articles are still in flight."""
+    rows = _pending(days, setup()[2], "a.article_id, a.created_at", "AND NOT coalesce(s2.ok_any, false)")
+    exclude = exclude or set()
+    return sum(1 for r in rows if f"{TASK}:{r['article_id']}" not in exclude or (before is not None and r["created_at"] < before))
 
 
 def to_row(article_id: str, res: llm.Result, model: str, effort: str | None, phash: str, run_id: str, batch_id: str | None = None) -> dict:
@@ -96,8 +110,11 @@ def collect(run_id: str) -> dict:
     if not lines:
         return {"collected": 0, "batches_finished": len(finished)}
     meta = {r["id"]: r for r in finished}
-    rows, results = [], []
+    rows, results, quota_skipped = [], [], 0
     for ln in lines:
+        if ln.quota:  # the account ran out of quota mid-batch: record nothing, so the article is simply resubmitted
+            quota_skipped += 1
+            continue
         rec = meta.get(ln.batch_id, {})
         model = rec.get("model", llm.task_config(TASK).model)
         if ln.body is not None:
@@ -114,13 +131,14 @@ def collect(run_id: str) -> dict:
         "ok": sum(1 for r in rows if r["status"] == "ok"),
         "batches_finished": len(finished),
         "cost_usd": round(cost, 4),
+        **({"quota_skipped": quota_skipped} if quota_skipped else {}),
     }
 
 
-def submit(limit: int, run_id: str) -> dict:
+def submit(limit: int, run_id: str, days: int = 7) -> dict:
     cfg, system, phash = setup()
     pend = batch.pending_ids(TASK)
-    articles = select_pending(limit, exclude=pend, phash=phash)
+    articles = select_pending(limit, days, exclude=pend, phash=phash)
     if not articles:
         return {"submitted": 0, "pending_batches": len(batch.pending(TASK))}
     texts = [article_text(a) for a in articles]

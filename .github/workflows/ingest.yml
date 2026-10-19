@@ -1,6 +1,7 @@
 name: ingest
 # Hourly: discover and fetch new political articles from every outlet, then annotate
 # (Stage 1 / Stage 2) and embed, and commit the new Parquet partitions to the private data repo.
+# The crawl needs no OpenAI: when the quota runs out, annotation pauses and the crawl keeps going.
 # Primary trigger: Google Cloud Scheduler (job fifth-estate-ingest, :07 every hour, see
 # scripts/setup_cloud_scheduler.sh) — GitHub's own cron dropped almost every run for this repo.
 # The cron below is only a backup, offset by half an hour; a run that finds nothing new is quick.
@@ -63,8 +64,24 @@ jobs:
           --since-hours "${{ inputs.since_hours || '36' }}"
           --max-fetch "${{ inputs.max_fetch || '150' }}"
           --summary "$GITHUB_STEP_SUMMARY"
-      - name: Annotate (Stage 1 → Stage 2 batch → embeddings)
+      - name: Annotation status
+        # Paused because the OpenAI quota ran out, or catching up afterwards? Then annotation looks back to
+        # the start of the outage (src/fifth_estate/annotate/pause.py), so those days are checked out too.
+        # Both steps come after Ingest so they can never stop the crawl.
+        id: status
         if: always()
+        run: uv run fifth status --github-output "$GITHUB_OUTPUT"
+      - name: Older partitions while paused or catching up
+        id: older
+        if: always() && steps.status.outputs.lookback_days > 7
+        run: |
+          for i in $(seq 8 $(( ${{ steps.status.outputs.lookback_days }} + 1 ))); do
+            d=$(date -d "-$i day" +%F)
+            for t in articles stage1 stage2 embeddings; do echo "/$t/date=$d/"; done
+          done | git -C data sparse-checkout add --stdin
+      - name: Annotate (Stage 1 → Stage 2 batch → embeddings)
+        # When the quota is used up this pauses (green, with a warning) instead of failing.
+        if: always() && steps.status.outcome == 'success' && steps.older.outcome != 'failure'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: uv run fifth annotate --summary "$GITHUB_STEP_SUMMARY"

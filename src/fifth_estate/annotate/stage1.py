@@ -23,9 +23,8 @@ CONCURRENCY = 24
 FLUSH_EVERY = 50
 
 
-def select_pending(limit: int, days: int = 7) -> list[dict]:
-    return lake.rows(
-        f"""
+def _pending_sql(days: int) -> str:
+    return f"""
         WITH a AS (
             SELECT * FROM {lake.source('articles', days)}
             QUALIFY row_number() OVER (PARTITION BY article_id ORDER BY created_at) = 1
@@ -37,10 +36,15 @@ def select_pending(limit: int, days: int = 7) -> list[dict]:
         SELECT a.article_id, a.outlet_id, a.title, a.section, a.body, a.published_at
         FROM a LEFT JOIN s USING (article_id)
         WHERE NOT coalesce(s.ok, false) AND coalesce(s.n, 0) < {MAX_ATTEMPTS}
-        ORDER BY a.published_at DESC NULLS LAST
-        LIMIT {int(limit)}
         """
-    )
+
+
+def select_pending(limit: int, days: int = 7) -> list[dict]:
+    return lake.rows(f"{_pending_sql(days)} ORDER BY a.published_at DESC NULLS LAST LIMIT {int(limit)}")
+
+
+def count_pending(days: int = 7) -> int:
+    return lake.rows(f"SELECT count(*) AS n FROM ({_pending_sql(days)})")[0]["n"]
 
 
 def setup() -> tuple[llm.TaskConfig, str, type, str, taxonomy.Taxonomy]:
@@ -90,9 +94,10 @@ def to_row(article_id: str, res: llm.Result, cfg: llm.TaskConfig, phash: str, ta
     return row
 
 
-async def _run(articles: list[dict], run_id: str, minutes: float) -> tuple[list[dict], list[llm.Result]]:
+async def _run(articles: list[dict], run_id: str, minutes: float) -> tuple[list[dict], list[llm.Result], llm.QuotaExhausted | None]:
     """Calls run concurrently; finished rows are flushed to the lake every FLUSH_EVERY results so a
-    killed job keeps its work, and no new request starts after `minutes` (the rest waits for the next run)."""
+    killed job keeps its work, and no new request starts after `minutes` (the rest waits for the next run)
+    or once the OpenAI quota is used up (nothing is recorded for those articles, so no attempt is lost)."""
     cfg, system, schema, phash, tax = setup()
     budget_left = llm.daily_budget() - llm.spent_today()
     deadline = time.monotonic() + minutes * 60
@@ -102,6 +107,7 @@ async def _run(articles: list[dict], run_id: str, minutes: float) -> tuple[list[
     rows: list[dict] = []
     pending: list[dict] = []
     results: list[llm.Result] = []
+    quota: list[llm.QuotaExhausted] = []
 
     def flush() -> None:
         if pending:
@@ -111,10 +117,14 @@ async def _run(articles: list[dict], run_id: str, minutes: float) -> tuple[list[
     async def one(a: dict) -> None:
         nonlocal spent
         async with sem:
-            if spent >= budget_left or time.monotonic() > deadline:
+            if quota or spent >= budget_left or time.monotonic() > deadline:
                 return
             body = llm.build_body(cfg, system, article_text(a, with_section=True), schema)
-            res = await llm.call_async(client, body, schema, cfg.service_tier)
+            try:
+                res = await llm.call_async(client, body, schema, cfg.service_tier)
+            except llm.QuotaExhausted as e:
+                quota.append(e)
+                return
             spent += llm.cost_usd(cfg.model, res.usage, res.service_tier)
             results.append(res)
             row = to_row(a["article_id"], res, cfg, phash, tax, run_id)
@@ -130,12 +140,12 @@ async def _run(articles: list[dict], run_id: str, minutes: float) -> tuple[list[
         log.warning("daily LLM budget reached; stage1 stopped early")
     if time.monotonic() > deadline:
         log.warning("stage1 time budget reached; the rest is left for the next run")
-    return rows, results
+    return rows, results, (quota[0] if quota else None)
 
 
-def run(limit: int, run_id: str | None = None, minutes: float | None = None) -> dict:
+def run(limit: int, run_id: str | None = None, minutes: float | None = None, days: int = 7) -> dict:
     run_id = run_id or lake.new_run_id()
-    articles = select_pending(limit)
+    articles = select_pending(limit, days)
     if not articles:
         return {"processed": 0}
     if llm.spent_today() >= llm.daily_budget():
@@ -143,9 +153,12 @@ def run(limit: int, run_id: str | None = None, minutes: float | None = None) -> 
         return {"processed": 0, "budget_exhausted": True}
     minutes = minutes if minutes is not None else float(load_yaml("models.yaml")["limits"].get("stage1_minutes", 30))
     t0 = time.monotonic()
-    rows, results = asyncio.run(_run(articles, run_id, minutes))
+    rows, results, quota = asyncio.run(_run(articles, run_id, minutes))
     cfg = llm.task_config("stage1")
     cost = llm.record_usage("stage1", cfg.model, cfg.service_tier, results, run_id)
+    if quota:
+        log.warning("stage1: OpenAI quota used up after %d articles", len(rows))
+        raise quota
     lat = sorted(r.latency for r in results if r.latency is not None)
     ok = [r for r in rows if r["status"] == "ok"]
     return {

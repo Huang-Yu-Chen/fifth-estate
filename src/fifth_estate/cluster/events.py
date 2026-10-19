@@ -89,9 +89,20 @@ def latest_run(table: str, days: int) -> str:
                USING (window_end, run_id))"""
 
 
+def missed_days(max_days: int = 15) -> list[date]:
+    """Window ends after the last one computed and before today, oldest first: days publish skipped, e.g.
+    while the website was paused after the OpenAI quota ran out. Older events are not shown on the site."""
+    today = lake.taipei_today()
+    last = lake.rows(f"SELECT max(window_end) AS d FROM {lake.source('events', max_days + 5)}")[0]["d"]
+    floor = today - timedelta(days=max_days)
+    first = max(last + timedelta(days=1), floor) if last else floor
+    return [first + timedelta(days=i) for i in range((today - first).days)]
+
+
 def _previous(end: date) -> dict[str, set[str]]:
     prev = end - timedelta(days=1)
-    rs = lake.rows(f"SELECT event_id, article_id FROM {latest_run('event_members', 5)} WHERE window_end = ?", [prev])
+    days = (lake.taipei_today() - end).days + 5
+    rs = lake.rows(f"SELECT event_id, article_id FROM {latest_run('event_members', days)} WHERE window_end = ?", [prev])
     out: dict[str, set[str]] = {}
     for r in rs:
         out.setdefault(r["event_id"], set()).add(r["article_id"])
@@ -99,8 +110,9 @@ def _previous(end: date) -> dict[str, set[str]]:
 
 
 def _previous_titles(end: date) -> dict[str, dict]:
+    days = (lake.taipei_today() - end).days + 5
     rs = lake.rows(
-        f"""SELECT event_id, title, short_title FROM {latest_run('events', 5)} WHERE window_end = ?""",
+        f"""SELECT event_id, title, short_title FROM {latest_run('events', days)} WHERE window_end = ?""",
         [end - timedelta(days=1)],
     )
     return {r["event_id"]: r for r in rs}
