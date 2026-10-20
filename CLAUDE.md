@@ -6,8 +6,8 @@ Code: this public repo. Data (full text + labels): private repo `Huang-Yu-Chen/f
 (Firebase Hosting site `the-fifth-estate` in the same Google Cloud project, also https://the-fifth-estate.web.app;
 DNS at GoDaddy, www → apex): a static dashboard deployed only when `web/` changes (`site.yml`) that reads the public
 API `fifth-estate-api` (Cloud Run, asia-east1, `src/fifth_estate/api`, deployed by `api.yml`), which also renders the
-pages that depend on the data; data updates never redeploy anything. (Until the domain's DNS is moved to Firebase,
-see the end of `scripts/setup_backend.sh`, it still points at the last GitHub Pages deploy of 2026-10-20.)
+pages that depend on the data; data updates never redeploy anything. The domain moved from GitHub Pages on 2026-10-20;
+Pages keeps the custom domain only so old huang-yu-chen.github.io/fifth-estate links redirect here (never deploy to it).
 
 Scheduling: Google Cloud Scheduler jobs `fifth-estate-ingest` (hourly :07) and `fifth-estate-publish`
 (every 3 h :27) in project `project-ec3ab1fc-4d15-40e8-a92`, region asia-east1, call workflow_dispatch with a
