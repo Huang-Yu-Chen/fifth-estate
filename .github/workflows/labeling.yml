@@ -1,0 +1,71 @@
+name: labeling
+# Copies the labels from the blinded labeling site's private bucket into the data repo: validation/labels/
+# {set}-{coder}.jsonl for `fifth eval`, and state/labeling_sync.json (when, how many), which the monitoring
+# dashboard shows. Runs after every publish run (Cloud Scheduler, every 3 hours), with a daily cron as a
+# backup. Signs in to Google Cloud as fifth-estate-labeling-sync by Workload Identity Federation (no keys,
+# scripts/deploy_labeling.sh): it can read that bucket and write only the weekly sets, and the public API's
+# accounts are never used here. The bucket is the repository variable FIFTH_LABEL_STORE; without it nothing
+# runs. This repo is public and so is this log, so it shows counts, never the coders' names.
+on:
+  workflow_run:
+    workflows: [publish]
+    types: [completed]
+  schedule:
+    - cron: "41 19 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: labeling
+  cancel-in-progress: false
+jobs:
+  sync:
+    if: vars.FIFTH_LABEL_STORE != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write   # sign in to Google Cloud without a stored key
+    env:
+      TZ: Asia/Taipei
+      FIFTH_DATA_DIR: ${{ github.workspace }}/data
+      FIFTH_LABEL_STORE: ${{ vars.FIFTH_LABEL_STORE }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: Huang-Yu-Chen/fifth-estate-data
+          ssh-key: ${{ secrets.DATA_REPO_DEPLOY_KEY }}
+          path: data
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: |
+            /validation/
+            /state/
+          sparse-checkout-cone-mode: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - uses: google-github-actions/auth@v3.0.0
+        with:
+          workload_identity_provider: projects/461716033038/locations/global/workloadIdentityPools/github/providers/fifth-estate-repo
+          service_account: fifth-estate-labeling-sync@project-ec3ab1fc-4d15-40e8-a92.iam.gserviceaccount.com
+      - name: Sync labels
+        run: |
+          uv run fifth labeling sync > /dev/null   # its output names the coders
+          jq -r '(.sets | to_entries[] | "\(.key): \(.value.labels) labels in the bucket, \(.value.appended) new lines, coders: \(.value.coders | length)"),
+                 (if .sets == {} then "no labels yet" else empty end)' data/state/labeling_sync.json
+      - name: Commit labels
+        working-directory: data
+        run: |
+          git config user.name "fifth-estate-bot"
+          git config user.email "fifth-estate-bot@users.noreply.github.com"
+          git add --sparse -A validation state/labeling_sync.json
+          if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
+          git commit -q -m "labels from the labeling site $(date +%FT%H:%M%z)"
+          for i in 1 2 3 4 5; do
+            if git pull -q --rebase && git push -q; then exit 0; fi
+            sleep $((i * 10))
+          done
+          exit 1

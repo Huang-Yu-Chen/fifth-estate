@@ -1,6 +1,8 @@
 name: weekly
 # Mondays 09:00 Taipei: scraper health, LLM spend, subtopic changes, and the MBD-style weekly
 # validation sample, posted as an Issue for review. Normally started by publish.yml (cron is a backup).
+# The sample is drawn once a week (a re-run keeps it) and put on the blinded labeling site, 1 labeler per
+# article, as fifth-estate-labeling-sync (see labeling.yml, which brings the labels back).
 on:
   schedule:
     - cron: "0 1 * * 1"
@@ -8,10 +10,17 @@ on:
 permissions:
   contents: read
   issues: write
+concurrency:
+  group: weekly   # publish.yml's dispatch and the cron backup can both fire: the second run waits, then finds the issue
+  cancel-in-progress: false
 jobs:
   report:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+      id-token: write   # the labeling site's bucket, without a stored key
     env:
       TZ: Asia/Taipei
       FIFTH_DATA_DIR: ${{ github.workspace }}/data
@@ -46,6 +55,7 @@ jobs:
       - run: uv sync --frozen
       - run: uv run fifth weekly-report --out report.md
       - name: Commit validation sample
+        id: commit
         working-directory: data
         run: |
           git config user.name "fifth-estate-bot"
@@ -55,11 +65,36 @@ jobs:
           git commit -q -m "weekly validation sample $(date +%G-W%V)"
           for i in 1 2 3; do if git pull -q --rebase && git push -q; then exit 0; fi; sleep 10; done
           exit 1
+      # Only once the sample is in the data repo, so the site never holds a sample the data repo lacks.
+      - uses: google-github-actions/auth@v3.0.0
+        if: vars.FIFTH_LABEL_STORE != ''
+        with:
+          workload_identity_provider: projects/461716033038/locations/global/workloadIdentityPools/github/providers/fifth-estate-repo
+          service_account: fifth-estate-labeling-sync@project-ec3ab1fc-4d15-40e8-a92.iam.gserviceaccount.com
+      - name: Put the sample on the labeling site
+        id: labeling
+        if: ${{ !cancelled() && steps.commit.outcome == 'success' && vars.FIFTH_LABEL_STORE != '' }}
+        env:
+          FIFTH_LABEL_STORE: ${{ vars.FIFTH_LABEL_STORE }}
+        run: |
+          week="$(date +%G-W%V)"
+          uv run fifth labeling publish --set "weekly-$week" --coders 1 --title "每週抽查 $week" --only-new
+          git -C data add --sparse -A validation   # the set file now records coders_per_article
+          if git -C data diff --cached --quiet; then exit 0; fi
+          git -C data commit -q -m "weekly sample $week on the labeling site"
+          for i in 1 2 3; do if git -C data pull -q --rebase && git -C data push -q; then exit 0; fi; sleep 10; done
+          exit 1
       - name: Open issue
+        if: ${{ !cancelled() && steps.commit.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          LABELING: ${{ steps.labeling.outcome }}
         run: |
           title="第五權週報 $(date +%G-W%V)"
+          case "$LABELING" in
+            success) printf '\n這批抽樣也放上了標註網站（每篇 1 位標註者），網站上的標註在每次 publish 後自動同步回資料 repo；進度看 `uv run fifth labeling status`。\n' >> report.md ;;
+            failure) printf '\n> ⚠ 這批抽樣沒能放上標註網站，請看這次 weekly 執行的紀錄。\n' >> report.md ;;
+          esac
           if gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "\"$title\" in:title" --json title --jq '.[].title' | grep -qxF "$title"; then
             echo "already posted: $title"
           else

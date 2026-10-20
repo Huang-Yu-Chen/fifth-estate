@@ -13,6 +13,7 @@
 GitHub Actions（本 repo）
  ├ ingest.yml   每小時   發現新文章 → 抓取 → 抽取清理 → Stage 1 分類 → Stage 2 立場評分 → 嵌入
  ├ publish.yml  每 3 小時 事件分群 → 子議題整併 → 指標與極化指數 → 資料庫快照 → Cloud Storage
+ ├ labeling.yml 每次 publish 後  人工標註站的標註同步回私有 repo
  ├ api.yml      API 程式改動時   部署後端 API（Cloud Run，台灣機房）
  ├ site.yml     網頁程式改動時   部署網站（GitHub Pages，自訂網域）
  └ weekly.yml   每週     驗證抽樣、子議題審核、資料健康報告
@@ -38,7 +39,7 @@ GitHub Actions 免金鑰登入）都在 `scripts/setup_backend.sh`，可重跑�
 
 給受邀標註者用的盲測網站，和公開網站、內部監控儀表板分開：獨立的 Cloud Run 服務，資料放在私有的 Cloud Storage。
 標註者只看得到和 AI 模型一樣的文本（清理過的標題與內文、媒體自稱已移除），看不到媒體名稱、網址、日期、AI 分數或
-其他標註者的評分；每篇文章由兩位標註者各自獨立評分。只有拿到個人連結的人能進入，網站不被搜尋引擎收錄。
+其他標註者的評分；金標準每篇由兩位標註者各自獨立評分，每週抽查每篇一位。只有拿到個人連結的人能進入，網站不被搜尋引擎收錄。
 
 ```bash
 bash scripts/deploy_labeling.sh                        # 第一次部署（可重跑）
@@ -46,9 +47,14 @@ uv run fifth gold-sample --name gold                   # 抽出金標準文章
 uv run fifth labeling publish --set gold --coders 2    # 放上標註站
 uv run fifth labeling invite --id lin --name 林小華     # 產生個人連結，私下傳給標註者
 uv run fifth labeling status                           # 進度
-uv run fifth labeling sync                             # 標註寫回資料 repo，再 commit
+gh workflow run labeling.yml                           # 馬上把標註同步回資料 repo（平常每次 publish 後自動同步）
 uv run fifth eval --set gold --coder all               # 模型與人工、人工與人工的一致性
 ```
+
+標註由 GitHub Actions 自動同步：每次 publish 之後，`labeling.yml` 把標註站的標註寫進私有 repo 的
+`validation/labels/`（`fifth eval` 與監控儀表板讀這裡）並 commit；`weekly.yml` 每週一抽出的驗證樣本也會自動放上
+標註站。Actions 用專屬的服務帳號 `fifth-estate-labeling-sync` 免金鑰登入，只能讀這個 bucket、只能寫每週抽樣，
+碰不到公開網站的資料；設定在 `scripts/deploy_labeling.sh`。
 
 ## 本機開發
 

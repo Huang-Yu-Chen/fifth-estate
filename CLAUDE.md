@@ -54,7 +54,13 @@ fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`)
   outlet, URL, date, model output, other labelers' labels or article ids (the browser gets random keys).
   `assign.py` gives each article to `coders_per_article` independent labelers. `fifth labeling sync` appends
   labels to `validation/labels/{set}-{coder}.jsonl` (same format as `fifth label`) and writes
-  `state/labeling_sync.json`; the private monitoring dashboard reads both.
+  `state/labeling_sync.json`; the private monitoring dashboard reads both. Sync is automatic: `labeling.yml`
+  runs it after every publish run (daily cron backup) and commits both to the data repo; `gh workflow run
+  labeling.yml` syncs now. `weekly.yml` puts the week's sample on the site (`labeling publish --only-new`; a
+  re-run of `weekly-report` keeps the week's sample). Both sign in as `fifth-estate-labeling-sync` (Workload
+  Identity Federation, main only), which can read the labeling bucket and write only `sets/weekly-*` (an IAM
+  condition) — never as the public API's accounts. The bucket is the repository variable `FIFTH_LABEL_STORE`;
+  the grants are in `scripts/deploy_labeling.sh`. This repo's Actions logs are public: print counts, not coder names.
 
 ## Decisions (from the user, 2026-10-13)
 - Crawl politics/兩岸/國際 sections only (no homepage scraping); 中時/民視 via Yahoo provider archives
@@ -68,3 +74,5 @@ fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`)
 - Never publish full article text; site shows titles, links, scores, short model reasons.
 - (2026-10-19) Human validation runs on the invite-only, blinded labeling site (Cloud Run + private bucket), each
   article labeled by 2 independent coders, same fields as the `fifth label` form.
+- (2026-10-20) The weekly samples go on the labeling site too, 1 coder per article. GitHub Actions reach the
+  labeling bucket only as their own account `fifth-estate-labeling-sync` (read all, write weekly sets only).

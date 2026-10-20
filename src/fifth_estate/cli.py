@@ -316,8 +316,11 @@ def weekly_report(out: str = typer.Option(..., help="Markdown file to write")) -
     from .validate import sample
 
     week = lake.taipei_today().strftime("%G-W%V")
-    ids = sample.weekly(days=7)
-    sample.save(f"weekly-{week}", ids)
+    if sample.set_path(f"weekly-{week}").exists():  # a re-run keeps the week's sample: it may be on the labeling site
+        ids = sample.load(f"weekly-{week}")
+    else:
+        ids = sample.weekly(days=7)
+        sample.save(f"weekly-{week}", ids)
     health = lake.rows(
         f"""SELECT outlet_id, count(*) FILTER (WHERE status = 'ok') AS ok,
                    count(*) FILTER (WHERE status IN ('http_error', 'extract_failed')) AS failed,

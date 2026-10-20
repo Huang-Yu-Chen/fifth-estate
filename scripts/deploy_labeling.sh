@@ -8,7 +8,8 @@
 # Kept apart from the public API (fifth-estate-api, bucket <project>-serving): its own service and
 # service account fifth-estate-labeling, which can touch only its own bucket <project>-labeling, and
 # its own build account fifth-estate-labeling-build. Only the image repository (Artifact Registry
-# "fifth-estate", set up with the public API) is shared.
+# "fifth-estate", set up with the public API) is shared. GitHub Actions reach the bucket as
+# fifth-estate-labeling-sync (below), never as the public API's accounts.
 set -euo pipefail
 
 PROJECT="$(gcloud config get-value project 2>/dev/null)"
@@ -17,6 +18,10 @@ SERVICE="fifth-estate-labeling"
 BUCKET="${LABEL_BUCKET:-$PROJECT-labeling}"
 SA="$SERVICE@$PROJECT.iam.gserviceaccount.com"
 BUILD_SA="$SERVICE-build@$PROJECT.iam.gserviceaccount.com"
+SYNC_SA="$SERVICE-sync@$PROJECT.iam.gserviceaccount.com"
+GITHUB_REPO="Huang-Yu-Chen/fifth-estate"
+POOL="github"               # Workload Identity pool and provider, created by scripts/setup_backend.sh
+PROVIDER="fifth-estate-repo"
 REPO="fifth-estate"
 IMAGE="$REGION-docker.pkg.dev/$PROJECT/$REPO/labeling:$(date -u +%Y%m%d-%H%M%S)"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -34,8 +39,35 @@ if ! gcloud iam service-accounts describe "$SA" --project "$PROJECT" >/dev/null 
   gcloud iam service-accounts create "$SERVICE" --project "$PROJECT" --display-name "第五權 labeling site"
   echo "✓ created service account $SA"
 fi
+# --condition None: the bucket's policy has a conditional binding (below), and gcloud then insists.
 gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" --member "serviceAccount:$SA" \
-  --role roles/storage.objectAdmin --quiet >/dev/null
+  --role roles/storage.objectAdmin --condition None --quiet >/dev/null
+
+# GitHub Actions (labeling.yml copies the labels into the data repo, weekly.yml puts the weekly sample on
+# the site) sign in as fifth-estate-labeling-sync by Workload Identity Federation: no keys, and only from
+# main of this repo. It can read this bucket and write sets/weekly-* only: not the labels, labelers.json
+# or any other set, and nothing outside this bucket. The workflows find the bucket in the repository
+# variable FIFTH_LABEL_STORE.
+if gcloud iam workload-identity-pools providers describe "$PROVIDER" --workload-identity-pool "$POOL" \
+  --location global --project "$PROJECT" >/dev/null 2>&1; then
+  if ! gcloud iam service-accounts describe "$SYNC_SA" --project "$PROJECT" >/dev/null 2>&1; then
+    gcloud iam service-accounts create "$SERVICE-sync" --project "$PROJECT" --display-name "第五權 labeling sync (GitHub Actions)"
+    sleep 15  # let the new account propagate before granting it roles
+  fi
+  gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" --member "serviceAccount:$SYNC_SA" \
+    --role roles/storage.objectViewer --condition None --quiet >/dev/null
+  gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" --member "serviceAccount:$SYNC_SA" \
+    --role roles/storage.objectUser --quiet >/dev/null \
+    --condition "expression=resource.name.startsWith(\"projects/_/buckets/$BUCKET/objects/sets/weekly-\"),title=weekly sets only"
+  NUMBER="$(gcloud projects describe "$PROJECT" --format 'value(projectNumber)')"
+  REPO_ID="$(gh api "repos/$GITHUB_REPO" --jq .id)"  # the numeric id survives renames
+  gcloud iam service-accounts add-iam-policy-binding "$SYNC_SA" --project "$PROJECT" --role roles/iam.workloadIdentityUser \
+    --member "principalSet://iam.googleapis.com/projects/$NUMBER/locations/global/workloadIdentityPools/$POOL/attribute.repository_id/$REPO_ID" >/dev/null
+  gh variable set FIFTH_LABEL_STORE --repo "$GITHUB_REPO" --body "gs://$BUCKET"
+else
+  echo "! No Workload Identity pool yet, so GitHub Actions can't sync labels: run scripts/setup_backend.sh, then this again"
+fi
+
 if ! gcloud artifacts repositories describe "$REPO" --location "$REGION" --project "$PROJECT" >/dev/null 2>&1; then
   gcloud artifacts repositories create "$REPO" --repository-format docker --location "$REGION" --project "$PROJECT"
 fi

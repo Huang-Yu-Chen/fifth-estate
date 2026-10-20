@@ -61,6 +61,7 @@ def publish(
     set_name: str = typer.Option(..., "--set", help="A set in validation/sets/ (e.g. from `fifth gold-sample`)"),
     coders: int = typer.Option(2, help="Independent labelers per article (0 = every labeler labels every article)"),
     title: str = typer.Option(None, help="Name labelers see (default: the set name)"),
+    only_new: bool = typer.Option(False, "--only-new", help="Leave the set as it is if it is already on the site, even closed (scheduled runs)"),
     store: str = typer.Option(None, help=STORE_HELP),
 ) -> None:
     """Put a label set on the site, blinded. Re-run after a codebook change: keys and labels are kept."""
@@ -68,10 +69,14 @@ def publish(
     from .store import load, save
 
     s = _store(store)
-    b, missing = bundle.build(set_name, coders, load(s, f"sets/{set_name}.json"), title)
+    prev = load(s, f"sets/{set_name}.json")
+    if prev and only_new:
+        console.print(f"{set_name} is already on the site; left as it is")
+        return
+    b, missing = bundle.build(set_name, coders, prev, title)
     save(s, f"sets/{set_name}.json", b, compact=True)
     bundle.mark_set(set_name, coders)
-    per = f"{coders} labelers per article" if coders else "every labeler labels every article"
+    per = f"{coders} labeler{'s' if coders > 1 else ''} per article" if coders else "every labeler labels every article"
     console.print(f"{set_name}: {len(b['items'])} articles on the site ({per}) → {s.url}")
     if missing:
         console.print(f"[yellow]{len(missing)} articles of the set are not in the local lake — pull the data repo and publish again[/]")
@@ -161,7 +166,9 @@ def status(store: str = typer.Option(None, help=STORE_HELP)) -> None:
 
 @app.command()
 def sync(store: str = typer.Option(None, help=STORE_HELP)) -> None:
-    """Copy the site's labels into the data repo (validation/labels/{set}-{coder}.jsonl) for `fifth eval`."""
+    """Copy the site's labels into the data repo (validation/labels/{set}-{coder}.jsonl) for `fifth eval`.
+    GitHub Actions does this after every publish run and commits it (labeling.yml); to get the labels sooner,
+    `gh workflow run labeling.yml` and pull the data repo, rather than syncing here."""
     from ..config import data_dir
     from .sync import run
 
@@ -170,7 +177,7 @@ def sync(store: str = typer.Option(None, help=STORE_HELP)) -> None:
         console.print(f"{set_name}: {d['labels']} labels in the bucket, {d['appended']} new lines, coders {', '.join(d['coders'])}")
     if not summary:
         console.print("no labels yet")
-    console.print("Commit them in the data repo:")
+    console.print("Commit them in the data repo right away (GitHub Actions commits the same files):")
     print(f"cd {data_dir()} && git add validation state/labeling_sync.json && git commit -m 'labels from the labeling site' && git pull --rebase && git push")
 
 

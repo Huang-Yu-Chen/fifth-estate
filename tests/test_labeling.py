@@ -272,6 +272,44 @@ def test_sync_appends_once_in_the_label_app_format(store, data, monkeypatch):
     assert state["sets"]["gold"]["coders"] == ["a"] and state["synced_at"]
 
 
+# --- GitHub Actions (weekly.yml puts the weekly sample on the site, labeling.yml syncs) ------
+
+
+def test_scheduled_publish_leaves_a_set_on_the_site_alone(store, data):
+    from typer.testing import CliRunner
+
+    from fifth_estate.labeling.cli import app
+
+    lake.write("articles", [_article("a1", "外交部回應", "外交部今天表示，" * 5)], lake.new_run_id())
+    sample.save("weekly-x", ["a1"])
+
+    def cli(*args: str) -> None:
+        result = CliRunner().invoke(app, [*args, "--set", "weekly-x", "--store", str(store.root)])
+        assert result.exit_code == 0, result.output
+
+    cli("publish", "--coders", "1", "--only-new")
+    first = load(store, "sets/weekly-x.json")
+    assert first["coders_per_article"] == 1 and json.loads(sample.set_path("weekly-x").read_text())["coders_per_article"] == 1
+    cli("close")
+    cli("publish", "--coders", "1", "--only-new")  # a re-run neither reopens nor rebuilds it
+    assert load(store, "sets/weekly-x.json") == {**first, "active": False}
+    cli("publish", "--coders", "1")  # by hand it does both
+    assert load(store, "sets/weekly-x.json")["active"] is True
+
+
+def test_weekly_report_keeps_the_weeks_sample(data, tmp_path):
+    from typer.testing import CliRunner
+
+    from fifth_estate.cli import app
+
+    name = f"weekly-{lake.taipei_today():%G-W%V}"
+    sample.save(name, ["a1", "a2"])  # drawn by an earlier run, maybe already on the labeling site
+    result = CliRunner().invoke(app, ["weekly-report", "--out", str(tmp_path / "report.md")])
+    assert result.exit_code == 0, result.output
+    assert sample.load(name) == ["a1", "a2"]
+    assert "本週驗證抽樣（2 篇" in (tmp_path / "report.md").read_text(encoding="utf-8")
+
+
 # --- fifth eval with several coders --------------------------------------------------------
 
 
