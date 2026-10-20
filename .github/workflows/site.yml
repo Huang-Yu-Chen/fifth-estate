@@ -50,7 +50,8 @@ jobs:
       - name: Deploy
         run: npx --yes firebase-tools@15.32.1 deploy --only hosting --project project-ec3ab1fc-4d15-40e8-a92 --non-interactive
       - name: Smoke test
-        # robots.txt comes from the API through Firebase; on a first deploy api.yml may still be finishing
+        # A release can take a few seconds to reach every edge (the first deploy got a 404 for /). robots.txt comes
+        # from the API through Firebase; on a first deploy api.yml may still be finishing.
         run: |
-          curl -fsS -o /dev/null "$SITE/"
+          curl -fsS -o /dev/null --retry 6 --retry-delay 10 --retry-all-errors "$SITE/"
           curl -fsS -o /dev/null --retry 12 --retry-delay 15 --retry-all-errors "$SITE/robots.txt"
