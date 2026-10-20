@@ -14,6 +14,9 @@ fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`)
 ## Commands
 - `uv run fifth ingest|annotate|stage1|stage2|embed|publish|stats|status` — pipeline steps (see `src/fifth_estate/cli.py`)
 - `uv run fifth gold-sample | label --coder X | eval --coder X --models a:low,b:low` — validation
+- `uv run fifth labeling publish --set gold | invite --id X --name Y | revoke | close | status | sync` — the
+  blinded labeling site for invited human coders; `fifth eval --coder all` pools every coder of a set.
+  Locally: `fifth labeling serve --dev --store <folder>` (folder holds a published set; prints a login link)
 - `uv run pytest` — tests; `cd web && npm run build` — dashboard (Vite + React + ECharts, zh-TW)
 - `uv run fifth export` (snapshot from the lake as is) + `uv run fifth serve` (API on :8000) + `cd web && npm run dev`
   (proxies `/v1` to it) — the site locally on real or fake data
@@ -43,6 +46,15 @@ fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`)
   (`gcloud storage ls -a gs://…/serving.sqlite.gz`, then `gcloud storage cp gs://…/serving.sqlite.gz#GEN gs://…/serving.sqlite.gz`).
   GitHub Actions sign in by Workload Identity Federation (no keys); all of it is in `scripts/setup_backend.sh`.
   Anonymous page views: the site beacons `POST /v1/hit`, logged as one JSON line per view (`api/hits.py`).
+- Labeling site (`src/fifth_estate/labeling`, `scripts/deploy_labeling.sh`): Cloud Run `fifth-estate-labeling`
+  (max 1 instance) + private bucket `<project>-labeling`, deliberately separate from the public API — it serves
+  blinded full text, so nothing from that bucket may go through `fifth-estate-api`. Invite-only (personal links
+  `…/#join=<token>`, only token hashes stored), `noindex`. Labelers see exactly what Stage 2 sees
+  (`annotate.common.blinded`) and the model's codebook cut from `prompts/` (`labeling/codebook.py`); never the
+  outlet, URL, date, model output, other labelers' labels or article ids (the browser gets random keys).
+  `assign.py` gives each article to `coders_per_article` independent labelers. `fifth labeling sync` appends
+  labels to `validation/labels/{set}-{coder}.jsonl` (same format as `fifth label`) and writes
+  `state/labeling_sync.json`; the private monitoring dashboard reads both.
 
 ## Decisions (from the user, 2026-10-13)
 - Crawl politics/兩岸/國際 sections only (no homepage scraping); 中時/民視 via Yahoo provider archives
@@ -54,3 +66,5 @@ fine-grained token (expires ~2027-10; re-run `scripts/setup_cloud_scheduler.sh`)
 - Polarization P = mean over axes of 100·(1/K²)ΣΣ|x̃o−x̃p| (equal outlet weights, EB shrinkage κ=5).
 - Site stays `status: beta` (+ `noindex`, which the build adds while beta) until the gold-set validation is done.
 - Never publish full article text; site shows titles, links, scores, short model reasons.
+- (2026-10-19) Human validation runs on the invite-only, blinded labeling site (Cloud Run + private bucket), each
+  article labeled by 2 independent coders, same fields as the `fifth label` form.

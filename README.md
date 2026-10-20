@@ -34,6 +34,22 @@ GitHub Actions 免金鑰登入）都在 `scripts/setup_backend.sh`，可重跑�
 
 新聞全文只存在私有 repo；公開網站只放標題、連結、分數與簡短理由。
 
+## 人工標註站（驗證 AI 標註）
+
+給受邀標註者用的盲測網站，和公開網站、內部監控儀表板分開：獨立的 Cloud Run 服務，資料放在私有的 Cloud Storage。
+標註者只看得到和 AI 模型一樣的文本（清理過的標題與內文、媒體自稱已移除），看不到媒體名稱、網址、日期、AI 分數或
+其他標註者的評分；每篇文章由兩位標註者各自獨立評分。只有拿到個人連結的人能進入，網站不被搜尋引擎收錄。
+
+```bash
+bash scripts/deploy_labeling.sh                        # 第一次部署（可重跑）
+uv run fifth gold-sample --name gold                   # 抽出金標準文章
+uv run fifth labeling publish --set gold --coders 2    # 放上標註站
+uv run fifth labeling invite --id lin --name 林小華     # 產生個人連結，私下傳給標註者
+uv run fifth labeling status                           # 進度
+uv run fifth labeling sync                             # 標註寫回資料 repo，再 commit
+uv run fifth eval --set gold --coder all               # 模型與人工、人工與人工的一致性
+```
+
 ## 本機開發
 
 ```bash

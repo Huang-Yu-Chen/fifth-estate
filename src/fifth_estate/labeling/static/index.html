@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>第五權 標註站</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="#/">第五權<span>標註站</span></a>
+  <nav id="nav" hidden>
+    <button type="button" class="link" id="nav-codebook">編碼手冊</button>
+    <span class="who" id="who"></span>
+  </nav>
+</header>
+<main id="app"><p class="muted center">載入中…</p></main>
+<dialog id="codebook" aria-labelledby="codebook-title">
+  <div class="dialog-head">
+    <h2 id="codebook-title">編碼手冊</h2>
+    <button type="button" class="close" id="codebook-close" aria-label="關閉">×</button>
+  </div>
+  <div class="dialog-body" id="codebook-body"></div>
+</dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

@@ -290,7 +290,7 @@ def label(set_name: str = typer.Option("gold", "--set"), coder: str = typer.Opti
 @app.command("eval")
 def evaluate_models(
     set_name: str = typer.Option("gold", "--set"),
-    coder: str = typer.Option(...),
+    coder: str = typer.Option(..., help="Human coder, several (a,b) or 'all' to pool every coder of the set"),
     models: str = typer.Option("gpt-6-luna:medium,gpt-6.1-sol:low,gpt-6-astra:low"),
     coder2: str = typer.Option(None, help="Second human coder for human–human agreement"),
     skip_predict: bool = typer.Option(False),
@@ -405,6 +405,11 @@ def stats(days: int = typer.Option(3)) -> None:
     for r in rs:
         t.add_row(r["day"], r["outlet_id"], str(r["n"]), str(r["chars"]))
     console.print(t)
+
+
+from .labeling.cli import app as labeling_app  # noqa: E402
+
+app.add_typer(labeling_app, name="labeling")
 
 
 def main() -> None:

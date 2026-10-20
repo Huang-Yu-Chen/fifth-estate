@@ -14,17 +14,23 @@ def render_prompt(name: str, **values: str) -> str:
     return text
 
 
+def blinded(row: dict) -> tuple[str, str]:
+    """Cleaned, source-blinded (title, body): what the models read, and what human labelers see."""
+    outlet = ingest_settings().outlet(row["outlet_id"])
+    return blind(clean_title(row["title"]), outlet.self_names), clean_body(row["body"], outlet.self_names)
+
+
 def article_text(row: dict, with_section: bool = False) -> str:
     """Cleaned, source-blinded article text. Section names are only shown to Stage 1
     (they can identify the outlet, so stance scoring never sees them)."""
-    outlet = ingest_settings().outlet(row["outlet_id"])
-    parts = [f"標題：{blind(clean_title(row['title']), outlet.self_names)}"]
+    title, body = blinded(row)
+    parts = [f"標題：{title}"]
     if with_section and row.get("section"):
         parts.append(f"版面：{row['section']}")
     parts.append("")
     parts.append("內文：")
-    parts.append(clean_body(row["body"], outlet.self_names))
+    parts.append(body)
     return "\n".join(parts)
 
 
-__all__ = ["CLEAN_VERSION", "article_text", "render_prompt"]
+__all__ = ["CLEAN_VERSION", "article_text", "blinded", "render_prompt"]
