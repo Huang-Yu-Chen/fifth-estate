@@ -250,16 +250,19 @@ def serve(
     port: int = typer.Option(8000),
 ) -> None:
     """Run the website's API locally on a snapshot file; `cd web && npm run dev` sends /v1 requests here.
-    A newer snapshot written to the same path (`fifth export` / `fifth publish`) is picked up within a minute."""
+    A newer snapshot written to the same path (`fifth export` / `fifth publish`) is picked up within a minute.
+    Unit and outlet pages (/unit/topic/recall) use the templates of the last `npm run build` in web/."""
     from pathlib import Path
 
     import uvicorn
 
+    from .config import REPO_ROOT
     from .export import serving
 
     path = Path(db).resolve() if db else serving.SERVING_DB
     os.environ["FIFTH_SERVING_DB"] = str(path)
     os.environ.pop("FIFTH_SERVING_BUCKET", None)
+    os.environ.setdefault("FIFTH_SITE_TEMPLATES", str(REPO_ROOT / "web" / "dist" / "page-templates.json"))
     console.print(f"API on http://{host}:{port} (docs at /docs), serving {path}")
     uvicorn.run("fifth_estate.api.app:app", host=host, port=port, log_level="warning")
 

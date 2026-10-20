@@ -33,7 +33,8 @@ BOTS = re.compile(
     re.I,
 )
 # Our own pages: navigation inside the site is not a referral.
-OWN_HOSTS = ("the-fifth-estate.org", "huang-yu-chen.github.io", "localhost", "127.0.0.1")
+OWN_HOSTS = ("the-fifth-estate.org", "the-fifth-estate.web.app", "the-fifth-estate.firebaseapp.com", "huang-yu-chen.github.io",
+             "localhost", "127.0.0.1")
 
 _secret = os.environ.get("FIFTH_VISITOR_SECRET", "").encode() or secrets.token_bytes(32)  # local: per process
 

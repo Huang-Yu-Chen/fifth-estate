@@ -2,6 +2,8 @@
 
 Read-only and anonymous. Responses carry the snapshot id as ETag; browsers reuse them for a minute and
 then revalidate, so a new publish reaches visitors within about two minutes without redeploying anything.
+The website's pages that depend on the data (units, outlets, sitemap.xml, robots.txt) are rendered here too,
+behind the site's domain: api/pages.py.
 
     uvicorn fifth_estate.api.app:app     (Cloud Run: see Dockerfile; locally: `fifth serve`)
 """
@@ -20,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response
 
-from . import hits, schema
+from . import hits, pages, schema
 from .snapshots import NoSnapshot, Store, log
 
 CACHE = "public, max-age=60, stale-while-revalidate=300"
@@ -47,12 +49,15 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
-def create_app(store: Store | None = None) -> FastAPI:
+def create_app(store: Store | None = None, templates: pages.Templates | None = None) -> FastAPI:
     store = store or Store.from_env()
+    templates = templates or pages.Templates.from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        await anyio.to_thread.run_sync(store.refresh)  # before uvicorn takes traffic, so no cold request waits on it
+        async with anyio.create_task_group() as tg:  # before uvicorn takes traffic, so no cold request waits on them
+            tg.start_soon(anyio.to_thread.run_sync, store.refresh)
+            tg.start_soon(anyio.to_thread.run_sync, templates.refresh)
         yield
 
     app = FastAPI(
@@ -63,6 +68,7 @@ def create_app(store: Store | None = None) -> FastAPI:
         "Titles, links, scores and short model reasons only; never article text.",
         lifespan=lifespan,
         redoc_url=None,
+        redirect_slashes=False,  # absolute, to the request's Host: behind Firebase Hosting that is Cloud Run's address
     )
     app.state.store = store
 
@@ -114,6 +120,7 @@ def create_app(store: Store | None = None) -> FastAPI:
             "articles": snap.info.get("articles") if snap else None,
             "source": store.source.describe(),
             "error": store.error,
+            "page_templates": {"source": templates.source, "version": templates.version, "error": templates.error},
         }
         return JSONResponse(body, status_code=200 if snap else 503, headers={"Cache-Control": "no-store"})
 
@@ -202,6 +209,7 @@ def create_app(store: Store | None = None) -> FastAPI:
         hits.record(body, _client_ip(request), request.headers.get("user-agent", ""))
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
+    app.include_router(pages.router(store, templates))
     return app
 
 

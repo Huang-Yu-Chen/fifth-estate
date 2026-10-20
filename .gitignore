@@ -21,4 +21,6 @@ validation/private/
 # Web
 web/node_modules/
 web/dist/
+.firebase/
+firebase-debug.log
 .DS_Store

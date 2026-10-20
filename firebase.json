@@ -1,0 +1,24 @@
+{
+  "hosting": {
+    "site": "the-fifth-estate",
+    "public": "web/dist",
+    "cleanUrls": true,
+    "trailingSlash": false,
+    "rewrites": [
+      { "source": "/unit/**", "run": { "serviceId": "fifth-estate-api", "region": "asia-east1" } },
+      { "source": "/outlet/**", "run": { "serviceId": "fifth-estate-api", "region": "asia-east1" } },
+      { "source": "/sitemap.xml", "run": { "serviceId": "fifth-estate-api", "region": "asia-east1" } },
+      { "source": "/robots.txt", "run": { "serviceId": "fifth-estate-api", "region": "asia-east1" } }
+    ],
+    "headers": [
+      {
+        "source": "/assets/**",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      },
+      {
+        "regex": "^/(coverage|grid|events|methodology|404\\.html|page-templates\\.json)?$",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      }
+    ]
+  }
+}

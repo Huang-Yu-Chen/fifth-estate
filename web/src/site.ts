@@ -1,5 +1,6 @@
-// Site address and page titles/descriptions, shared by the app (browser tab titles) and the build, which writes
-// one HTML file per route with these in <head> for link previews and search engines (vite.config.ts).
+// Site address and page titles/descriptions, shared by the app (browser tab titles), the build, which writes the
+// fixed pages with these in <head> for link previews and search engines, and the API, which renders the unit and
+// outlet pages from the page-templates.json the build makes of them (vite.config.ts).
 
 export const SITE_URL = "https://the-fifth-estate.org";
 export const SITE_NAME = "第五權 The Fifth Estate";
@@ -34,6 +35,8 @@ export function pageTitle(name?: string | null): string {
   return name ? `${name}｜第五權` : `${SITE_NAME}｜${SITE_TAGLINE}`;
 }
 
+// The API words its pages with these two through templates (vite.config.ts "describe"): a new case here (say, one
+// kind worded differently) needs a template there and in src/fifth_estate/api/pages.py describe().
 export function unitDescription(kind: string, name: string, detail?: string): string {
   if (kind === "event") return `新聞事件「${name}」：${COMPARE}`;
   return detail ? `${name}：${detail}。${COMPARE}` : `${name}：${COMPARE}`;

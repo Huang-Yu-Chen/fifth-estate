@@ -1,19 +1,25 @@
 name: site
-# The dashboard (web/) on GitHub Pages, built and deployed only when its code changes. The data is not part of
-# the build: the pages fetch it from the API (VITE_API_BASE in web/.env.production), which publish.yml keeps
-# up to date without redeploying anything.
+# The dashboard (web/) on Firebase Hosting (site the-fifth-estate, firebase.json), built and deployed only when its
+# code changes. The data is not part of the build: the pages fetch it from the API (VITE_API_BASE in
+# web/.env.production), and the API renders the pages that depend on it (units, outlets, sitemap.xml, robots.txt:
+# src/fifth_estate/api/pages.py) from this build's page-templates.json, so publish.yml keeps the whole site up to
+# date without redeploying it. config/pipeline.yaml is here for site.status (noindex on the fixed pages in beta).
+# Signs in without a stored key (Workload Identity Federation, scripts/setup_backend.sh) as fifth-estate-deployer.
 on:
   push:
     branches: [main]
-    paths: ["web/**", ".github/workflows/site.yml"]
+    paths: ["web/**", "firebase.json", "config/pipeline.yaml", ".github/workflows/site.yml"]
   workflow_dispatch:
 permissions:
   contents: read
+  id-token: write
 concurrency:
-  group: pages
+  group: site
   cancel-in-progress: false
+env:
+  SITE: https://the-fifth-estate.web.app
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -28,18 +34,23 @@ jobs:
         run: |
           npm ci
           npm run build
-      - uses: actions/upload-pages-artifact@v5.0.0
+      - name: Keep the scripts of the version being replaced
+        # Pages loaded before this deploy, and unit pages the API rendered from the old templates (it rereads them
+        # within a minute), still find their scripts. The new page-templates.json lists only this build's.
+        run: |
+          prev="$(curl -fsS --max-time 30 "$SITE/page-templates.json" | jq -r '.assets[]?')" || true
+          for f in $prev; do
+            [[ "$f" =~ ^assets/[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] || continue
+            [ -e "web/dist/$f" ] || curl -fsS --max-time 30 -o "web/dist/$f" "$SITE/$f" || echo "could not keep $f"
+          done
+      - uses: google-github-actions/auth@v3.0.0
         with:
-          path: web/dist
-  deploy:
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5.0.1
+          workload_identity_provider: projects/461716033038/locations/global/workloadIdentityPools/github/providers/fifth-estate-repo
+          service_account: fifth-estate-deployer@project-ec3ab1fc-4d15-40e8-a92.iam.gserviceaccount.com
+      - name: Deploy
+        run: npx --yes firebase-tools@15.32.1 deploy --only hosting --project project-ec3ab1fc-4d15-40e8-a92 --non-interactive
+      - name: Smoke test
+        # robots.txt comes from the API through Firebase; on a first deploy api.yml may still be finishing
+        run: |
+          curl -fsS -o /dev/null "$SITE/"
+          curl -fsS -o /dev/null --retry 12 --retry-delay 15 --retry-all-errors "$SITE/robots.txt"

@@ -15,15 +15,16 @@ GitHub Actions（本 repo）
  ├ publish.yml  每 3 小時 事件分群 → 子議題整併 → 指標與極化指數 → 資料庫快照 → Cloud Storage
  ├ labeling.yml 每次 publish 後  人工標註站的標註同步回私有 repo
  ├ api.yml      API 程式改動時   部署後端 API（Cloud Run，台灣機房）
- ├ site.yml     網頁程式改動時   部署網站（GitHub Pages，自訂網域）
+ ├ site.yml     網頁程式改動時   部署網站（Firebase Hosting，自訂網域）
  └ weekly.yml   每週     驗證抽樣、子議題審核、資料健康報告
 私有 repo fifth-estate-data：新聞全文與標註（Parquet，DuckDB 查詢）
 ```
 
 網站（the-fifth-estate.org）只是前端程式，資料向後端 API 讀取；publish 每次產生一份唯讀的 SQLite 資料庫快照
-上傳到 Cloud Storage，API 在一分鐘內自動換上，資料更新不必重新部署網站。API 文件見
+上傳到 Cloud Storage，API 在一分鐘內自動換上，資料更新不必重新部署網站。隨資料而生的頁面（議題、事件、媒體頁，
+以及 sitemap.xml、robots.txt）由 API 依當下的快照產出 HTML，所以新事件一出現就有自己的網址、標題與連結預覽。API 文件見
 <https://fifth-estate-api-461716033038.asia-east1.run.app/docs>。Google Cloud 上的設定（儲存桶、服務帳號、
-GitHub Actions 免金鑰登入）都在 `scripts/setup_backend.sh`，可重跑。
+Firebase Hosting、GitHub Actions 免金鑰登入）都在 `scripts/setup_backend.sh`，可重跑。
 
 排程由 Google Cloud Scheduler（台灣機房）呼叫 GitHub 的 workflow_dispatch 觸發；GitHub 自己的 cron 只當備援，
 因為它在這個 repo 幾乎每次都被略過。設定方式見 `scripts/setup_cloud_scheduler.sh`（需要一個只限本 repo、

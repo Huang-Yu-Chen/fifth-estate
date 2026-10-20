@@ -27,7 +27,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen
-      - run: uv run pytest -q tests/test_api.py
+      - run: uv run pytest -q tests/test_api.py tests/test_pages.py
       - uses: google-github-actions/auth@v3.0.0
         with:
           workload_identity_provider: projects/461716033038/locations/global/workloadIdentityPools/github/providers/fifth-estate-repo
