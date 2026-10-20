@@ -20,6 +20,8 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
+from .. import config  # noqa: F401  (loads .env, where deploy_labeling.sh put FIFTH_LABEL_STORE and FIFTH_LABEL_URL)
+
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="Blinded labeling site for human coders (validates the AI labels).")
 console = Console()
 
